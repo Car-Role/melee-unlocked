@@ -324,15 +324,17 @@ static float g_settings_gd_focus_top = 0.0f;   // top of the row holding the con
 static bool g_settings_gd_focus_seen = false;
 
 static ImU32 settings_accent_for(int appearance, int variant) {
-  static constexpr ImU32 palette[7][4] = {
+  static constexpr ImU32 palette[9][4] = {
     {IM_COL32(247,38,133,255),IM_COL32(27,204,218,255),IM_COL32(255,157,47,255),IM_COL32(160,89,241,255)},
     {IM_COL32(255,203,68,255),IM_COL32(253,83,110,255),IM_COL32(164,190,252,255),IM_COL32(110,93,215,255)},
     {IM_COL32(240,180,41,255),IM_COL32(55,143,242,255),IM_COL32(48,185,131,255),IM_COL32(232,74,83,255)},
     {IM_COL32(34,151,255,255),IM_COL32(171,101,251,255),IM_COL32(46,197,142,255),IM_COL32(250,179,63,255)},
     {IM_COL32(34,151,255,255),IM_COL32(239,79,166,255),IM_COL32(50,207,178,255),IM_COL32(250,179,63,255)},
     {IM_COL32(100,154,220,255),IM_COL32(173,183,195,255),IM_COL32(80,168,133,255),IM_COL32(220,157,73,255)},
-    {IM_COL32(49,92,168,255),IM_COL32(92,111,137,255),IM_COL32(49,122,86,255),IM_COL32(154,97,49,255)}};
-  return palette[std::clamp(appearance,0,6)][std::clamp(variant,0,3)];
+    {IM_COL32(49,92,168,255),IM_COL32(92,111,137,255),IM_COL32(49,122,86,255),IM_COL32(154,97,49,255)},
+    {IM_COL32(49,92,168,255),IM_COL32(92,111,137,255),IM_COL32(49,122,86,255),IM_COL32(154,97,49,255)},
+    {IM_COL32(230,52,68,255),IM_COL32(52,130,246,255),IM_COL32(44,206,140,255),IM_COL32(226,234,246,255)}};
+  return palette[std::clamp(appearance,0,8)][std::clamp(variant,0,3)];
 }
 static ImU32 settings_accent(int appearance) {
   if (g_settings_custom_color_enabled)
@@ -377,7 +379,8 @@ struct SettingsAppearanceScope {
     }
     const ImVec4 accent = ImGui::ColorConvertU32ToFloat4(settings_accent(appearance));
     const ImVec4 muted = appearance == 0 ? ImVec4(0.17f,0.06f,0.14f,1) :
-        appearance == 2 ? ImVec4(0.18f,0.21f,0.25f,1) : ImVec4(0.10f,0.15f,0.22f,1);
+        appearance == 2 ? ImVec4(0.18f,0.21f,0.25f,1) :
+        appearance == 8 ? ImVec4(0.08f,0.12f,0.19f,1) : ImVec4(0.10f,0.15f,0.22f,1);
     ImGui::PushStyleColor(ImGuiCol_Button,muted);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered,accent);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,accent);
@@ -392,7 +395,7 @@ struct SettingsAppearanceScope {
     ImGui::PushStyleColor(ImGuiCol_HeaderActive,accent);
     ImGui::PushStyleColor(ImGuiCol_PopupBg,ImVec4(0.04f,0.055f,0.085f,0.99f));
     ImGui::PushStyleColor(ImGuiCol_NavCursor,accent);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,appearance==1?10.0f:appearance==2?0.0f:4.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,appearance==1?10.0f:appearance==2?0.0f:appearance==8?2.0f:4.0f);
   }
   ~SettingsAppearanceScope() {
     if (old) { ImGui::PopFont(); ImGui::GetStyle() = saved; }
@@ -655,6 +658,34 @@ static void settings_page_footer(SettingsState& state, int appearance) {
     settings_quit_button(state, ImVec2(p.x+s.x-8-quit_w, top+6), ImVec2(quit_w, 27));
     return;
   }
+  if (appearance == 8) {
+    const float top = p.y + s.y - 46.0f;
+    draw->AddLine(ImVec2(p.x + 20.0f, top - 6.0f), ImVec2(p.x + s.x - 20.0f, top - 6.0f),
+                  IM_COL32(235, 242, 252, 85), 1.2f);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + 20.0f, top));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.12f, 0.19f, 0.96f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.22f, 0.34f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.30f, 0.44f, 1.0f));
+    if (ImGui::Button(yougame::stdio_bridge() ? "RETURN##rui_return" : "F1  RETURN##rui_return", ImVec2(138.0f, 32.0f)))
+      state.open = false;
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    const float menu_x = p.x + s.x - 48.0f;
+    settings_quit_button(state, ImVec2(menu_x - quit_w - 10.0f, top), ImVec2(quit_w, 32.0f));
+    ImGui::SetCursorScreenPos(ImVec2(menu_x, top));
+    if (settings_hit_button("##page_more", ImVec2(32, 32))) ImGui::OpenPopup("##settings_actions");
+    draw->AddText(ImVec2(menu_x + 6, top + 6), IM_COL32(230, 238, 250, 255), "...");
+    if (ImGui::BeginPopup("##settings_actions")) {
+      ImGui::TextDisabled(state.dirty ? "Saving changes..." : state.saved ? "Settings saved" : "Changes save automatically");
+      ImGui::Separator();
+      if (ImGui::MenuItem("Return to game")) state.open = false;
+      if (ImGui::MenuItem("Restart game")) state.confirm = SettingsState::Confirm::Restart;
+      if (ImGui::MenuItem("Quit game")) state.confirm = SettingsState::Confirm::Quit;
+      ImGui::EndPopup();
+    }
+    return;
+  }
   if (appearance == 5) {
     // Simple: the same rounded buttons as its category list (selected purple, resting navy),
     // instead of Clean side's slanted chips.
@@ -772,14 +803,15 @@ static void settings_page_footer(SettingsState& state, int appearance) {
 static void settings_field_label(const char* label) {
   if (ImGui::GetCurrentWindow()->DC.IsSameLine)
     ImGui::NewLine();
-  if ((g_settings_form_style == 0 || g_settings_form_style == 3 || g_settings_form_style == 4) && label[0] != '#') {
+  if ((g_settings_form_style == 0 || g_settings_form_style == 3 || g_settings_form_style == 4 || g_settings_form_style == 8) && label[0] != '#') {
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float x=ImGui::GetCursorPosX(), width=ImGui::GetContentRegionAvail().x;
     ImDrawList* draw=ImGui::GetWindowDrawList();
     constexpr float label_h=26.0f;
     const ImU32 bg=g_settings_form_style==0?IM_COL32(18,20,35,224):
-                   g_settings_form_style==3?IM_COL32(24,38,54,242):IM_COL32(12,28,47,218);
-    draw->AddRectFilled(start,ImVec2(start.x+width,start.y+label_h),bg,7.0f);
+                   g_settings_form_style==3?IM_COL32(24,38,54,242):
+                   g_settings_form_style==8?IM_COL32(14,22,36,220):IM_COL32(12,28,47,218);
+    draw->AddRectFilled(start,ImVec2(start.x+width,start.y+label_h),bg,g_settings_form_style==8?2.0f:7.0f);
     draw->AddRectFilled(start,ImVec2(start.x+3,start.y+label_h),settings_accent(g_settings_form_style),2.0f);
     draw->AddText(settings_heading_font(),15.0f,ImVec2(start.x+12,start.y+4),
                   IM_COL32(229,235,245,255),label);
@@ -814,7 +846,7 @@ static bool settings_toggle(const char* label, bool* value) {
 }
 static bool settings_toggle_draw(const char* label, bool* value) {
   if (g_settings_form_style == 2 && label[0] != '#') return settings_gd_toggle(label,value);
-  if (g_settings_form_style >= 6) return settings_widgets::Checkbox(label,value);
+  if (g_settings_form_style == 6 || g_settings_form_style == 7) return settings_widgets::Checkbox(label,value);
   if (ImGui::GetCurrentWindow()->DC.IsSameLine)
     ImGui::NewLine();
   ImGui::PushID(label);
@@ -839,11 +871,12 @@ static bool settings_toggle_draw(const char* label, bool* value) {
     draw->AddConvexPolyFilled(strip,4,IM_COL32(10,12,27,205));
     draw->AddLine(strip[0],strip[1],settings_palette_tint(0,IM_COL32(215,49,144,160)),1.0f);
     if (nav_frame) settings_nav_frame(draw,strip);
-  } else if (g_settings_form_style == 3 || g_settings_form_style == 4) {
+  } else if (g_settings_form_style == 3 || g_settings_form_style == 4 || g_settings_form_style == 8) {
     draw->AddRectFilled(a,b,g_settings_form_style==3?
-                        IM_COL32(30,42,58,249):IM_COL32(12,28,47,218),10.0f);
-    // The solid row surface carries the control; edge rails added visual noise and
-    // made the first label look clipped against a blue line.
+                        IM_COL32(30,42,58,249):g_settings_form_style==8?IM_COL32(14,22,35,220):IM_COL32(12,28,47,218),
+                        g_settings_form_style==8?2.0f:10.0f);
+    if (g_settings_form_style == 8)
+      draw->AddLine(ImVec2(a.x, b.y), b, IM_COL32(235,242,252,32), 1.0f);
   }
   if (focused) draw->AddRectFilled(a, b, ImGui::GetColorU32(ImVec4(1,1,1,0.045f)), 5.0f);
   draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(a.x+(g_settings_form_style==0||g_settings_form_style>=3?12.0f:0.0f), a.y + 8.0f), ink,
@@ -873,7 +906,7 @@ static bool settings_combo(const char* label, int* value, const char* const item
 }
 static bool settings_combo_draw(const char* label, int* value, const char* const items[], int count) {
   if (g_settings_form_style == 2 && label[0] != '#') return settings_gd_combo(label,value,items,count);
-  if (g_settings_form_style >= 6) {
+  if (g_settings_form_style == 6 || g_settings_form_style == 7) {
     ImGui::PushID(label);
     const float available = ImGui::GetContentRegionAvail().x;
     const float width = std::min(330.0f, std::max(120.0f, available - ImGui::CalcTextSize(label).x - 12.0f));
@@ -906,7 +939,7 @@ static bool settings_slider(const char* label, int* value, int low, int high,
 }
 static bool settings_slider_draw(const char* label, int* value, int low, int high, const char* format, ImGuiSliderFlags flags) {
   if (g_settings_form_style == 2 && label[0] != '#') return settings_gd_slider(label,value,low,high,format);
-  if (g_settings_form_style >= 6) {
+  if (g_settings_form_style == 6 || g_settings_form_style == 7) {
     ImGui::PushID(label);
     ImGui::SetNextItemWidth(std::min(330.0f, std::max(120.0f, ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(label).x - 12.0f)));
     const bool result=ImGui::SliderInt("##value",value,low,high,format,flags);

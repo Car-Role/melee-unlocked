@@ -97,6 +97,8 @@ static constexpr bool kShowFasterSoundEffects = true;
 #include "mod_profile.h"
 #include "mod_scan.h"
 #include "lab_view.h"
+#include "redesigned_ui.h"
+#include "ui_sources/redesigned/settings_theme.inl"
 #include "training_overlay.h"
 #include "net_overlay.h"
 #include "coming_soon_overlay.h"
@@ -403,6 +405,8 @@ void settings_set_hud_snapshot(const Frame& frame) {
   g_hud_players = frame.hud_players;
   g_hud_player_names = frame.player_names;
   combo_track(frame.sequence);
+  gx::redesigned_ui::set_online_names(frame.player_names.data());
+  gx::redesigned_ui::publish_fallback_frame(frame);
 }
 
 // The Arcade look's combo counter (counted in combo_track): "N HITS" over the attacker, in the game's
@@ -2427,6 +2431,14 @@ void load_pc_settings(RenderOptions& options, int& volume) {
     if (value.empty()) continue;
     if (source_port::mods::parse_choice(key, value, &options.mod_choices)) continue;
     if (load_rtx_key(key, value)) continue;
+    if (key.compare(0, 13, "redesigned_ui") == 0) {
+      if (key == "redesigned_ui") options.redesigned_ui = value == "1";
+      else if (key == "redesigned_ui_hud") options.redesigned_ui_hud = value != "0";
+      else if (key == "redesigned_ui_pause") options.redesigned_ui_pause = value != "0";
+      else if (key == "redesigned_ui_menus") options.redesigned_ui_menus = value != "0";
+      else if (key == "redesigned_ui_select") options.redesigned_ui_select = value != "0";
+      continue;
+    }
     try {
       bool matched = true;
       if (key == "fps") { double rate = std::stod(value); if (rate == -1 || rate == 0 || rate >= 30) options.fps_cap = std::min(rate, 2000.0); }
@@ -2541,10 +2553,10 @@ void load_pc_settings(RenderOptions& options, int& volume) {
         options.settings_transparency = std::clamp(std::atoi(value.c_str()), 0, 65);
       else if (key == "overlaystyle") {
         int selected = std::atoi(value.c_str());
-        options.overlay_style = selected >= 0 && selected <= 7 ? selected : 0;
+        options.overlay_style = selected >= 0 && selected <= 8 ? selected : 0;
       }
       else if (key.size() == 15 && key.compare(0, 14, "overlaypalette") == 0 &&
-               key[14] >= '0' && key[14] <= '6')
+               key[14] >= '0' && key[14] <= '8')
         options.overlay_palettes[key[14] - '0'] = std::clamp(std::atoi(value.c_str()), 0, 3);
       else if (key == "stockhudscale") options.stock_hud_scale = std::clamp(std::atoi(value.c_str()), 75, 175);
       else if (key == "damagehudscale") options.damage_hud_scale = std::clamp(std::atoi(value.c_str()), 75, 175);
@@ -3774,6 +3786,25 @@ void settings_context_create(void* window, bool open_at_startup) {
     arena_panel::set_fonts(fonts);
   }
 #endif
+  // Condensed geometric display & body fonts for the optional Redesigned UI refresh.
+  {
+    ImFont* rui_disp = nullptr;
+    ImFont* rui_head = nullptr;
+    ImFont* rui_body = nullptr;
+#ifdef _WIN32
+    if (std::filesystem::exists("C:\\Windows\\Fonts\\bahnschrift.ttf")) {
+      rui_disp = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\bahnschrift.ttf", 64.0f);
+      rui_head = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\bahnschrift.ttf", 28.0f);
+      rui_body = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\bahnschrift.ttf", 18.0f);
+    }
+#endif
+    if (!rui_disp && std::filesystem::exists(heading_font_path))
+      rui_disp = io.Fonts->AddFontFromFileTTF(heading_font_path.c_str(), 64.0f);
+    if (!rui_disp) rui_disp = g_settings_heading_font ? g_settings_heading_font : g_settings_body_font;
+    if (!rui_head) rui_head = g_settings_heading_font ? g_settings_heading_font : rui_disp;
+    if (!rui_body) rui_body = g_settings_body_font ? g_settings_body_font : rui_head;
+    gx::redesigned_ui::set_fonts(rui_disp, rui_head, rui_body, rui_disp);
+  }
   // ImGui's outline version of the old font, for scaled frames (see settings_old_font). Added last,
   // so the fonts above keep their places, and nothing is rasterised from it until it is used.
   g_settings_old_vector_font = io.Fonts->AddFontDefaultVector();
@@ -3838,6 +3869,7 @@ void settings_context_create(void* window, bool open_at_startup) {
 #endif
 
 void settings_context_destroy() {
+  gx::redesigned_ui::shutdown();
   for (auto& preview : g_cosmetic_previews)
     if (preview.second) ImGui::UnregisterUserTexture(preview.second.get());
   g_cosmetic_previews.clear();
@@ -5295,6 +5327,13 @@ static bool write_settings_file_impl(const SettingsState& state, const RenderOpt
        << "\noverlaypalette4 " << options.overlay_palettes[4]
        << "\noverlaypalette5 " << options.overlay_palettes[5]
        << "\noverlaypalette6 " << options.overlay_palettes[6]
+       << "\noverlaypalette7 " << options.overlay_palettes[7]
+       << "\noverlaypalette8 " << options.overlay_palettes[8]
+       << "\nredesigned_ui " << (options.redesigned_ui ? 1 : 0)
+       << "\nredesigned_ui_hud " << (options.redesigned_ui_hud ? 1 : 0)
+       << "\nredesigned_ui_pause " << (options.redesigned_ui_pause ? 1 : 0)
+       << "\nredesigned_ui_menus " << (options.redesigned_ui_menus ? 1 : 0)
+       << "\nredesigned_ui_select " << (options.redesigned_ui_select ? 1 : 0)
        << "\nstockhudscale " << options.stock_hud_scale
        << "\ndamagehudscale " << options.damage_hud_scale
        << "\nplayernicknames " << (options.show_player_nicknames ? 1 : 0)
@@ -6530,12 +6569,17 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                              !state.fill_window,
                          ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
   if (!clean_replay) net_overlay::draw(ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-  {   // YouGame's Coming soon stickers over the online menu (drawn only while its first page shows)
+  {   // Optional Redesigned UI refresh + YouGame's Coming soon stickers over the game picture.
     const ImVec2 screen = ImGui::GetIO().DisplaySize;
     const float aspect = presented_aspect(options, (int)screen.x, (int)screen.y, true);
     float gw = screen.x, gh = gw / std::max(aspect, 0.1f);
     if (gh > screen.y) { gh = screen.y; gw = gh * aspect; }
     const float gx0 = (screen.x - gw) * 0.5f, gy0 = (screen.y - gh) * 0.5f;
+    gx::redesigned_ui::set_flags(gx::redesigned_ui::effective_flags(options, clean_replay));
+    gx::redesigned_ui::set_iso_path(host::options.iso);
+    if (!state.fill_window && !lab_on && !host::options.spectate) {
+      gx::redesigned_ui::draw(ImVec2(gx0, gy0), ImVec2(gx0 + gw, gy0 + gh), ImGui::GetIO().DeltaTime);
+    }
     coming_soon_overlay::draw(gx0, gy0, gx0 + gw, gy0 + gh);
   }
   if (!host::options.spectate)   // the room's live match window: no replay bar (see replay_hud above)
@@ -6689,13 +6733,13 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
   }
   if (panel_visible) {
-    g_settings_palette = options.overlay_palettes[std::clamp(options.overlay_style, 0, 6)];
+    g_settings_palette = options.overlay_palettes[std::clamp(options.overlay_style, 0, 8)];
     g_settings_custom_color_enabled = options.settings_custom_color_enabled;
     g_settings_custom_color = ImVec4(options.settings_custom_color[0],options.settings_custom_color[1],
                                      options.settings_custom_color[2],1.0f);
     const SettingsAppearanceScope appearance_scope(options.overlay_style);
     const bool old_menu = options.overlay_style == 7;
-    const bool classic_menu = options.overlay_style >= 6;
+    const bool classic_menu = (options.overlay_style == 6 || options.overlay_style == 7);
     if (options.overlay_style == 6) {
       // Match the compact v0.6.6 settings screen: black canvas, navy controls,
       // purple selected tab, and Lucida Console text. The F11 legacy view is
@@ -6740,6 +6784,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                           options.overlay_style == 3 ? display.x - 24.0f :
                           options.overlay_style == 4 ? std::min(960.0f, display.x - 24.0f) :
                           options.overlay_style == 6 ? std::min(980.0f, display.x - 40.0f) :
+                          options.overlay_style == 8 ? std::min(940.0f, display.x - 28.0f) :
                                                        std::min(860.0f, display.x - 24.0f);
       const float w = std::max(300.0f, std::min(width, display.x - 12.0f));
       // Radial fills the height so its header and close button sit at the top of the window, not
@@ -6747,6 +6792,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       const float h = options.overlay_style == 3 ? std::max(320.0f, display.y - 12.0f) :
                       options.overlay_style == 4 ? std::max(360.0f,std::min(710.0f,display.y-40.0f)) :
                       options.overlay_style == 6 ? std::max(360.0f,std::min(710.0f,display.y-40.0f)) :
+                      options.overlay_style == 8 ? std::max(380.0f,std::min(740.0f,display.y-36.0f)) :
                       options.overlay_style == 2 ? w * 3.0f / 4.0f :
                       std::max(320.0f, std::min(790.0f, display.y - 12.0f));
       const ImVec2 base_pos = options.overlay_style == 0 ? ImVec2(display.x - w, 0) :
@@ -6757,7 +6803,8 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
       ImGui::SetNextWindowSize(ImVec2(w, options.overlay_style == 0 ? display.y : h), ImGuiCond_Always);
     const bool scene_chrome = options.overlay_style == 0 || options.overlay_style == 1 ||
-                                (options.overlay_style >= 2 && options.overlay_style <= 4);
+                                (options.overlay_style >= 2 && options.overlay_style <= 4) ||
+                                options.overlay_style == 8;
       ImGui::SetNextWindowBgAlpha(scene_chrome ? 0.0f : classic_menu ? 1.0f :
                                   options.overlay_style == 0 ? 0.90f : 0.97f);
       ImGui::Begin("PC settings", &state.open, ImGuiWindowFlags_NoTitleBar |
@@ -6860,6 +6907,24 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     const bool clean_detail_theme = options.overlay_style == 0 && !state.fill_window;
     const bool dashboard_detail_theme = options.overlay_style == 1 && !state.fill_window;
     const bool wide_detail_theme = options.overlay_style == 4 && !state.fill_window;
+    const bool redesigned_detail_theme = options.overlay_style == 8 && !state.fill_window;
+    if (redesigned_detail_theme) {
+      static constexpr const char* rui_tabs[] = {
+          "Video", "Audio", "Game", "Controls", "Overlays", "Customize", "Gecko Codes", "Mods"};
+      ImDrawList* draw = ImGui::GetWindowDrawList();
+      const ImVec2 p = ImGui::GetWindowPos(), s = ImGui::GetWindowSize();
+      const float alpha_scale = 1.0f - (float)std::clamp(options.settings_transparency, 0, 65) / 100.0f;
+      const ImU32 accent = settings_accent(8);
+      gx::redesigned::settings_theme::draw_panel_backdrop(draw, p, ImVec2(p.x + s.x, p.y + s.y), alpha_scale, accent);
+      gx::redesigned::settings_theme::draw_header(draw, settings_heading_font(), g_settings_body_font,
+                                                  p, s.x, rui_tabs[std::clamp(state.active_tab, 0, 7)], accent);
+      ImGui::SetCursorScreenPos(ImVec2(p.x + s.x - 42.0f, p.y + 18.0f));
+      if (settings_close_hit("##close_redesigned", ImVec2(28.0f, 28.0f))) state.open = false;
+      draw->AddLine(ImVec2(p.x + s.x - 34.0f, p.y + 26.0f), ImVec2(p.x + s.x - 22.0f, p.y + 38.0f),
+                    IM_COL32(226, 234, 246, 230), 1.8f);
+      draw->AddLine(ImVec2(p.x + s.x - 22.0f, p.y + 26.0f), ImVec2(p.x + s.x - 34.0f, p.y + 38.0f),
+                    IM_COL32(226, 234, 246, 230), 1.8f);
+    }
     if (dashboard_detail_theme) {
       ImDrawList* draw = ImGui::GetWindowDrawList();
       const ImVec2 p = ImGui::GetWindowPos(), s = ImGui::GetWindowSize();
@@ -6950,6 +7015,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           // Wide tabs: settings_wide_home has already drawn this style's header and its title.
           // Drawing the shared banner as well put a second SETTINGS on top of it.
           ImGui::SetCursorPos(ImVec2(20, 56));
+        } else if (redesigned_detail_theme) {
+          // Redesigned: draw_header above already painted the header and hairline.
+          ImGui::SetCursorPos(ImVec2(20, 74));
         } else {
           ImGui::PushFont(settings_heading_font());
           ImGui::TextUnformatted("SETTINGS");
@@ -6959,6 +7027,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     }
     ImGui::BeginDisabled(!state.open);
     if ((options.overlay_style != 2 || state.fill_window) && !clean_detail_theme &&
+        !redesigned_detail_theme &&
         !(options.overlay_style == 3 && !state.fill_window) &&
         !state.legacy_presentation && options.overlay_style != 6) ImGui::Separator();
     const bool icon_dashboard = options.overlay_style == 1;
@@ -7023,6 +7092,25 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                                                     (window_size.y - 200.0f) * 0.34f));
       ImGui::SetCursorScreenPos(ImVec2(window_pos.x + 26.0f + nav_width + 22.0f,
                                        window_pos.y + 112.0f));
+    } else if (redesigned_detail_theme) {
+      static constexpr const char* rui_nav_labels[] = {
+          "Video", "Audio", "Game", "Controls", "Overlays", "Customize", "Gecko Codes", "Mods"};
+      const float nav_width = 178.0f;
+      const ImU32 accent = settings_accent(8);
+      ImGui::BeginChild("##settings_navigation_rui", ImVec2(nav_width, -56), false);
+      ImDrawList* nav_dl = ImGui::GetWindowDrawList();
+      for (int i = 0; i < 8; ++i) {
+        ImGui::PushID(i);
+        const bool clicked = settings_hit_button("##rui_nav", ImVec2(nav_width - 8.0f, 40.0f));
+        const bool hovered = ImGui::IsItemHovered() || ImGui::IsItemFocused();
+        const ImVec2 na = ImGui::GetItemRectMin(), nb = ImGui::GetItemRectMax();
+        gx::redesigned::settings_theme::draw_nav_item(nav_dl, settings_heading_font(), na, nb,
+                                                      rui_nav_labels[i], state.active_tab == i, hovered, accent);
+        if (clicked) state.active_tab = i;
+        ImGui::PopID();
+      }
+      ImGui::EndChild();
+      ImGui::SameLine(0.0f, 12.0f);
     } else {
       const float nav_width = options.overlay_style == 0 ? 78.0f :
                               151.0f;
@@ -7074,7 +7162,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
       draw->AddRectFilled(a, b, IM_COL32(12, 21, 32, 246), 14.0f);
       draw->AddRect(a, b, IM_COL32(76, 105, 132, 150), 14.0f, 0, 1.0f);
     }
-    if (clean_detail_theme || dashboard_detail_theme ||
+    if (clean_detail_theme || dashboard_detail_theme || redesigned_detail_theme ||
         (options.overlay_style >= 2 && options.overlay_style <= 4))
       ImGui::PushStyleColor(ImGuiCol_ChildBg,
                             gd_page ? ImVec4(0, 0, 0, 0) :
@@ -9237,6 +9325,28 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         ImGui::TextUnformatted("Customize");
         ImGui::TextDisabled("Choose the menu layout, colors, and transparency.");
         ImGui::Spacing();
+        settings_section("Redesigned UI (Optional)");
+        changed |= settings_toggle("Enable Redesigned UI", &options.redesigned_ui);
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Optional minimalist UI refresh inspired by \"Melee Redesigned\".\n"
+                            "Off by default so classic Melee stays untouched. Display only (safe online and hidden in Clean Replays).");
+        ImGui::BeginDisabled(!options.redesigned_ui);
+        changed |= settings_toggle("Match HUD, Timer & Banners", &options.redesigned_ui_hud);
+        changed |= settings_toggle("Pause Menu", &options.redesigned_ui_pause);
+        changed |= settings_toggle("Title & Main Menus", &options.redesigned_ui_menus);
+        changed |= settings_toggle("Character & Stage Select", &options.redesigned_ui_select);
+        ImGui::EndDisabled();
+        if (options.overlay_style != 8 && !state.legacy_presentation) {
+          if (settings_widgets::Button("Use matching Redesigned settings theme", ImVec2(-1.0f, 30.0f))) {
+            options.overlay_style = 8;
+            state.clean_detail_open = false; state.dashboard_detail_open = false;
+            state.gd_detail_open = false; state.radial_detail_open = false; state.wide_detail_open = false;
+            state.content_anim_tab = -1;
+            changed = true;
+          }
+        }
+        ImGui::Spacing();
+        settings_section("PC Settings Appearance");
         changed |= settings_toggle("Enable Legacy Menu (F11)", &options.legacy_menu_enabled);
         ImGui::TextWrapped("F11 and launcher Settings open the selected legacy menu. Both menus edit the same settings.");
         const char* legacy_names[] = {"Legacy Old (v0.6.6)", "Legacy New"};
@@ -9252,16 +9362,22 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
         }
         ImGui::Spacing();
         static constexpr const char* appearance_names[] = {
-            "Clean side", "Icon tiles", "GD Melee", "Radial", "Wide tabs", "Simple"};
+            "Clean side", "Icon tiles", "GD Melee", "Radial", "Wide tabs", "Simple", "Redesigned"};
         static constexpr const char* appearance_images[] = {
-            "clean-side.png", "icon-tiles.png", "gd-melee.png", "radial.png", "wide-tabs.png", "simple.png"};
+            "clean-side.png", "icon-tiles.png", "gd-melee.png", "radial.png", "wide-tabs.png", "simple.png", "redesigned.png"};
         static constexpr const char* appearance_hints[] = {
             "Pink side panel; settings slide in beside the live game",
             "Rounded, dimensional settings tiles",
             "GD Melee's slanted navigation and matching setting rows",
             "Controller-first radial category navigation",
             "Wide category tabs with live settings pages",
-            "Compact settings layout"};
+            "Compact settings layout",
+            "Minimalist obsidian-slate glass matching the Redesigned UI refresh"};
+        static constexpr int appearance_gallery_styles[] = {0, 1, 2, 3, 4, 5, 8};
+        const auto gallery_idx_for = [&](int style) -> int {
+          for (int k = 0; k < 7; ++k) if (appearance_gallery_styles[k] == style) return k;
+          return 0;
+        };
         static const char* const palette_names[7][4] = {
           {"Original pink", "Electric cyan", "Sunset amber", "Arcade violet"},
           {"Original candy", "Arcade brights", "Soft pastels", "Night lights"},
@@ -9503,7 +9619,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
             g_menu_style_gallery_open=true;
           }
           if (ImTextureData* current_preview=cosmetic_preview(ui_source_asset_path(
-                  "menu_previews",appearance_images[std::clamp(options.overlay_style,0,5)]))) {
+                  "menu_previews",appearance_images[gallery_idx_for(options.overlay_style)]))) {
             const ImVec2 preview_size(160.0f,120.0f);
             if (settings_widgets::ImageButton("##current_menu_style",current_preview->GetTexRef(),preview_size)) {
               ImGui::OpenPopup("Menu styles");
@@ -9534,8 +9650,9 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           const float image_h=image_w*0.75f;
           const float card_h=image_h+34.0f;
           ImGui::BeginDisabled(state.legacy_presentation);
-          for(int style=0;style<6;++style) {
-            if(style%per_row) ImGui::SameLine(0.0f,gap);
+          for(int gidx=0;gidx<7;++gidx) {
+            const int style=appearance_gallery_styles[gidx];
+            if(gidx%per_row) ImGui::SameLine(0.0f,gap);
             ImGui::PushID(style);
             const bool pressed=settings_hit_button("##appearance_picture",ImVec2(card_w,card_h));
             const bool hovered=ImGui::IsItemHovered()||ImGui::IsItemFocused();
@@ -9545,7 +9662,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
             const ImVec2 image_min(a.x+(card_w-image_w)*0.5f,a.y+6.0f);
             const ImVec2 image_max(image_min.x+image_w,image_min.y+image_h);
             if(ImTextureData* preview=cosmetic_preview(
-                ui_source_asset_path("menu_previews",appearance_images[style]))) {
+                ui_source_asset_path("menu_previews",appearance_images[gidx]))) {
               draw->AddImage(preview->GetTexRef(),image_min,image_max);
             } else {
               draw->AddRectFilled(image_min,image_max,IM_COL32(9,16,28,255));
@@ -9553,7 +9670,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
                             "Preview unavailable");
             }
             const ImU32 accent=settings_accent_for(style,options.overlay_palettes[style]);
-            draw->AddText(ImVec2(a.x+9,image_max.y+7),IM_COL32(239,245,252,255),appearance_names[style]);
+            draw->AddText(ImVec2(a.x+9,image_max.y+7),IM_COL32(239,245,252,255),appearance_names[gidx]);
             if(options.overlay_style==style||hovered)
               draw->AddRect(a,b,options.overlay_style==style?accent:IM_COL32(232,239,248,180),
                             7.0f,0,options.overlay_style==style?2.0f:1.2f);
@@ -9580,7 +9697,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
           } else g_menu_style_gallery_open=false;
           ImGui::Spacing();
           ImGui::TextUnformatted("Color palette");
-          int& palette = options.overlay_palettes[std::clamp(options.overlay_style, 0, 6)];
+          int& palette = options.overlay_palettes[std::clamp(options.overlay_style, 0, 8)];
           for (int i=0;i<4;++i) {
             if (i) ImGui::SameLine(0.0f,10.0f);
             ImGui::PushID(i);
@@ -12406,7 +12523,7 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     ImGui::PopTextWrapPos();
     ImGui::EndChild();
     ImGui::PopStyleVar(3);
-    if (clean_detail_theme || dashboard_detail_theme ||
+    if (clean_detail_theme || dashboard_detail_theme || redesigned_detail_theme ||
         (options.overlay_style >= 2 && options.overlay_style <= 4))
       ImGui::PopStyleColor();
     const ImVec2 content_size = ImGui::GetItemRectSize();
@@ -12903,13 +13020,13 @@ bool settings_frame(SettingsState& state, RenderOptions& options) {
     static constexpr const char* pages[] = {
         "Video", "Audio", "Game", "Controls", "Overlays", "Customize", "Gecko Codes", "Mods"};
     static constexpr const char* styles[] = {
-        "Clean side", "Icon tiles", "GD Melee", "Radial", "Wide tabs", "Simple", "Classic", "Legacy Old"};
+        "Clean side", "Icon tiles", "GD Melee", "Radial", "Wide tabs", "Simple", "Classic", "Legacy Old", "Redesigned"};
     static bool logged_open = false, logged_menu = false;
     static int logged_page = -1;
     if (state.open && !logged_open)
       host::log("settings: overlay opened (port %d, page %s, style %s)",
                 state.settings_controller_port + 1, pages[std::clamp(state.active_tab, 0, 7)],
-                styles[std::clamp(options.overlay_style, 0, 7)]);
+                styles[std::clamp(options.overlay_style, 0, 8)]);
     if (state.open && state.active_tab != logged_page)
       host::log("settings: page %s", pages[std::clamp(state.active_tab, 0, 7)]);
     if (state.open && state.page_navigation.active)

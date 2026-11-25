@@ -98,8 +98,15 @@ struct RenderOptions {
   bool settings_menu_sounds = false;
   bool settings_custom_color_enabled = false;
   std::array<float, 3> settings_custom_color{0.96f, 0.15f, 0.52f};
-  int overlay_style = 0;          // 0: Clean side, 1: Icon tiles, 2: GD Melee, 3: Radial, 4: Wide tabs, 5: Simple, 6: Classic (legacy)
-  std::array<int, 7> overlay_palettes{}; // independent palette (0 classic, 1-3 alternate) for each appearance
+  int overlay_style = 0;          // 0: Clean side, 1: Icon tiles, 2: GD Melee, 3: Radial, 4: Wide tabs, 5: Simple, 6: Classic (legacy), 7: Legacy Old, 8: Redesigned
+  std::array<int, 9> overlay_palettes{}; // independent palette (0 classic, 1-3 alternate) for each appearance
+  // Optional Redesigned UI refresh (inspired by Dave Abarra's "Melee Redesigned").
+  // Off by default so retail Melee UI stays untouched unless opted in. Display only; safe online.
+  bool redesigned_ui = false;
+  bool redesigned_ui_hud = true;
+  bool redesigned_ui_pause = true;
+  bool redesigned_ui_menus = true;
+  bool redesigned_ui_select = true;
   int settings_transparency = 0;  // percent of the settings layer's alpha removed, 0..65
   int stock_hud_scale = 100;       // percent of the original stock HUD root scale
   int damage_hud_scale = 100;      // percent of the original damage HUD root scale

@@ -152,6 +152,32 @@ int mu_ko_explosions_hidden(void);
 int mu_hud_emblems_hidden(void);
 /* "Damage percents: Hidden" (hud_scales bit 16): no percents or emblems drawn (shim/mu_hud_scale.c). */
 int mu_hud_percents_hidden(void);
+/* Optional Redesigned UI refresh (shim/mu_redesigned_ui.c, MuHostApi version 34). Display only. */
+unsigned int mu_rui_flags(void);
+int mu_rui_hud_active(void);
+int mu_rui_pause_active(void);
+int mu_rui_title_active(void);
+int mu_rui_menus_active(void);
+int mu_rui_css_active(void);
+int mu_rui_sss_active(void);
+void mu_rui_note_title(int ready, int intro_active);
+void mu_rui_note_menu(int menu_kind, int prev_menu, int selection, int item_count, int entering,
+                      unsigned int item_mask, int online_page, int online_sub);
+void mu_rui_note_css_header(int ready_to_fight, int ready_timer, int is_teams, int match_type,
+                            int mode, int stocks, int time_minutes, int door_count,
+                            int is_mex, int is_online, int online_mode, unsigned int unlocked_mask);
+void mu_rui_note_css_port(int port, int kind, int sel_icon, int char_kind, int costume,
+                          int team, int cpu_level, int locked, int holding_puck,
+                          float hand_x, float hand_y, float puck_x, float puck_y,
+                          const char* nametag);
+void mu_rui_sync_css_bounds(void* icons_void, int count, int is_mex);
+void mu_rui_note_sss(int is_mex, int confirmed, int loading, int hovered_index, int hovered_stkind,
+                     int frozen_stadium, int is_online, unsigned int unlocked_mask,
+                     unsigned int struck_mask, float cursor_x, float cursor_y);
+int mu_rui_sss_hit_test(float cx, float cy, unsigned int unlocked_mask, int* out_icon);
+void mu_rui_note_banner(int elem_idx);
+void mu_rui_note_pause(int slot, int flag);
+void mu_rui_publish_frame(void);
 /* Community codes (HUD tab, MU_DISPLAY_OPTION_* in mu_host.h), the native versions of the players' favourite Gecko codes. All are
  * picture or sound only: never in a replay, never sent to an opponent. */
 #define MU_DISPLAY_HUD_FADE           0x00001000u   /* HUD Transparency: a player's HUD fades while a fighter is behind it */

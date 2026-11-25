@@ -14,12 +14,13 @@
 #include <stdint.h>
 #include "mu_native_pose.h"
 #include "mu_lcancel_view.h"
+#include "mu_redesigned_ui.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define MU_HOST_API_VERSION 33
+#define MU_HOST_API_VERSION 34
 #define MU_GAME_API_VERSION 10
 #define MU_SLIPPI_RESPONSE_CAPACITY 4096u
 
@@ -441,6 +442,11 @@ typedef struct MuHostApi {
      * the name. `dx` is the robot's centre right of the tag's x and `width` the room the name left for
      * it, both in 640x480 units; width 0 when this tag has none. Display only. */
     void (*hud_pro_tag)(int32_t slot, float dx, float width);
+    /* Version 34. Optional Redesigned UI refresh (mu_redesigned_ui.h). Display only: flags() returns
+     * MU_RUI_FLAG_* (0 when off or in Clean Replays), and snapshot() receives a read-only snapshot
+     * of the live menu/select/HUD/pause state once per drawn frame (never during rollback resim). */
+    uint32_t (*redesigned_ui_flags)(void);
+    void (*redesigned_ui_snapshot)(const MuRedesignedUiSnapshot* snap);
 } MuHostApi;
 
 /* Start each new sound in the sound frame being mixed now instead of the next one (5 ms sooner):

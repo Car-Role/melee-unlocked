@@ -9,6 +9,7 @@ or animation data.
 |---|---|---|---|
 | `gd_melee/` | GD's Melee, GPL-2.0-or-later | `motion.h` contains ported panel slide curves and `assets/` contains extracted source menu art; settings controls remain in `pc_settings.cpp` | Remove the GD appearance adapter calls, its motion state fields, and `gd_melee/`; no CMake entry is used |
 | `mockups/` | User-selected mockup sheets | `assets/` contains reference thumbnails for appearance selection | Remove its asset directory and the appearance preview references |
+| `redesigned/` | Original clean-room UI inspired by Dave Abarra's "Melee Redesigned" (GPL-2.0-or-later) | `theme.h`, `assets.inl`, `hud.inl`, `menus.inl`, `settings_theme.inl` invoked via `redesigned_ui.h`/`.cpp` | Remove `redesigned/`, `redesigned_ui.*`, `menu_previews/assets/redesigned.png`, and the `overlay_style == 8` + Customize toggles |
 | `yampp/` | YAMPP | No YAMPP files are in the product source yet; this directory is a labeled import boundary | Remove `yampp/` and any future YAMPP adapter/CMake entry |
 
 The source review clones under `build-integration/` are not product source,

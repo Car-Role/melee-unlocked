@@ -114121,7 +114121,7 @@ index fe223378a..578ec7c92 100644
  {
      return gm_8049E548.unk_C;
 diff --git a/src/melee/gm/gmpause.c b/src/melee/gm/gmpause.c
-index 41da1f742..b1bc20ea4 100644
+index 41da1f742..47d2a2593 100644
 --- a/src/melee/gm/gmpause.c
 +++ b/src/melee/gm/gmpause.c
 @@ -10,6 +10,9 @@
@@ -114134,7 +114134,30 @@ index 41da1f742..b1bc20ea4 100644
  
  struct PauseData {
      /* +0 */ HSD_JObj* background;
-@@ -65,12 +68,24 @@ void gm_801A0FEC(s32 slot, u8 flag)
+@@ -39,9 +42,22 @@ void fn_801A0E34(HSD_GObj* arg0)
+     }
+ }
+ 
++#ifdef MU_NATIVE
++static void mu_rui_pause_render(HSD_GObj* gobj, intptr_t pass)
++{
++    if (mu_rui_pause_active()) {
++        return;
++    }
++    HSD_GObj_JObjCallback(gobj, pass);
++}
++#endif
++
+ void gm_801A0FEC(s32 slot, u8 flag)
+ {
+     lbl_80479B10.slot = slot;
++#ifdef MU_NATIVE
++    mu_rui_note_pause(slot, flag);
++#endif
+     HSD_JObjReqAnimAll(lbl_80479B10.background, (f32) (slot + 1));
+     // flag is set by match rules
+     if (flag != 0) {
+@@ -65,12 +81,27 @@ void gm_801A0FEC(s32 slot, u8 flag)
          HSD_JObjSetFlagsAll(lbl_80479B10.background, JOBJ_HIDDEN);
      }
      HSD_JObjAnimAll(lbl_80479B10.background);
@@ -114149,6 +114172,9 @@ index 41da1f742..b1bc20ea4 100644
  void gm_801A10FC(int slot)
  {
      lbl_80479B10.slot = 99;
++#ifdef MU_NATIVE
++    mu_rui_note_pause(-1, 0);
++#endif
      HSD_JObjSetFlagsAll(lbl_80479B10.background, JOBJ_HIDDEN);
 +#ifdef MU_NATIVE
 +    /* TM-CE Display Stick Info When Paused / Remove Text on UnPause (801A1124) */
@@ -114159,7 +114185,7 @@ index 41da1f742..b1bc20ea4 100644
  }
  
  void fn_801A1134(void)
-@@ -80,10 +95,10 @@ void fn_801A1134(void)
+@@ -80,10 +111,10 @@ void fn_801A1134(void)
      HSD_JObj* jobj;
  
      lbl_804D6700 =
@@ -114172,11 +114198,16 @@ index 41da1f742..b1bc20ea4 100644
      lbl_80479B10.background = jobj;
      lb_80011E24(jobj, &lbl_80479B10.analog_stick, 1, -1);
      lb_80011E24(jobj, &lbl_80479B10.lras, 9, -1);
-@@ -92,7 +107,7 @@ void fn_801A1134(void)
+@@ -91,8 +122,12 @@ void fn_801A1134(void)
+     lb_80011E24(jobj, &lbl_80479B10.analog_stick_outline, 11, -1);
      lbl_80479B10.analog_stick = HSD_JObjGetChild(lbl_80479B10.analog_stick);
      HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
++#ifdef MU_NATIVE
++    GObj_SetupGXLink(gobj, mu_rui_pause_render, 0xBU, 0U);
++#else
      GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 0xBU, 0U);
 -    gm_8016895C(jobj, scene->models[0], 0);
++#endif
 +    gm_8016895C(jobj, DP(DP(scene->models)[0]), 0);
      HSD_JObjReqAnimAll(jobj, 1.0f);
      HSD_JObjAnimAll(jobj);
@@ -115748,15 +115779,12 @@ index 286f9512f..2d3387b9c 100644
      {
          true,
          GM_TITLE,
-diff --git a/src/melee/gm/gm_1A45.c b/src/melee/gm/gmscene.c
-similarity index 64%
-rename from src/melee/gm/gm_1A45.c
-rename to src/melee/gm/gmscene.c
-index be743ad04..edc59ef3e 100644
---- a/src/melee/gm/gm_1A45.c
+diff --git a/src/melee/gm/gmscene.c b/src/melee/gm/gmscene.c
+new file mode 100644
+index 000000000..8fec4a74e
+--- /dev/null
 +++ b/src/melee/gm/gmscene.c
-@@ -1,7 +1,12 @@
--#include "gm_1A45.h"
+@@ -0,0 +1,515 @@
 +#if MU_ROGUE  /* rogueMelee + Melee Maker */
 +#include <mu_bm.h>
 +#endif
@@ -115764,16 +115792,29 @@ index be743ad04..edc59ef3e 100644
 +#include <melee/rogue/platform/melee/rogue_hooks.h>
 +#endif
 +#include "gmscene.h"
- 
- #include "gm_1A36.h"
--#include "gm_1A45.static.h"
- #include "gm_unsplit.h"
- #include "gmmain_lib.h"
- #include "gmscdata.h"
-@@ -23,13 +28,27 @@
- #include <sysdolphin/baselib/perf.h>
- #include <sysdolphin/baselib/sobjlib.h>
- 
++
++#include "gm_1A36.h"
++#include "gm_unsplit.h"
++#include "gmmain_lib.h"
++#include "gmscdata.h"
++#include <dolphin/os/OSThread.h>
++#include <melee/db/db.h>
++#include <melee/if/ifcoget.h>
++#include <melee/lb/lb_013B.h>
++#include <melee/lb/lb_0195.h>
++#include <melee/lb/lbaudio_ax.h>
++#include <melee/lb/lbcardgame.h>
++#include <melee/lb/lbheap.h>
++#include <sysdolphin/baselib/class.h>
++#include <sysdolphin/baselib/controller.h>
++#include <sysdolphin/baselib/gobjproc.h>
++#include <sysdolphin/baselib/hsd_3924.h>
++#include <sysdolphin/baselib/hsd_392C.h>
++#include <sysdolphin/baselib/initialize.h>
++#include <sysdolphin/baselib/leak.h>
++#include <sysdolphin/baselib/perf.h>
++#include <sysdolphin/baselib/sobjlib.h>
++
 +/* 479D30 */ static HSD_GObjLibInitDataType gobj_init_data;
 +/* 479D58 */ static struct gm_80479D58_t gm_80479D58;
 +#ifdef MU_NATIVE
@@ -115788,34 +115829,140 @@ index be743ad04..edc59ef3e 100644
 +/* 4D6724 */ void (*gm_804D6724)(void);
 +/* 4D6720 */ struct GameSceneInfo* gm_804D6720;
 +
- static u64 gm_803DA888[8] = {
-     0, 0x82FFFA, 0, 0x8EFFFA, 0x800FFA, 0x808FFA, 0x800FFA, 0,
- };
- 
- u64 gm_803DA8C8[2] = { -1, -1 };
- 
--int gm_GetDbPauseFlag(int bit)
++static u64 gm_803DA888[8] = {
++    0, 0x82FFFA, 0, 0x8EFFFA, 0x800FFA, 0x808FFA, 0x800FFA, 0,
++};
++
++u64 gm_803DA8C8[2] = { -1, -1 };
++
 +bool gm_GetDbPauseFlag(int bit)
- {
-     return gm_80479D58.unk_10.x0 & (1ULL << bit);
- }
-@@ -106,6 +125,12 @@ void gm_801A4970(struct gm_DbPauseInputHandlers* db_input)
- 
-     var_r26 = 0;
-     for (i = 0; i < PAD_MAX_CONTROLLERS; i++) {
++{
++    return gm_80479D58.unk_10.x0 & (1ULL << bit);
++}
++
++int gm_801A4624(void)
++{
++    return gm_80479D58.unk_10.x0;
++}
++
++void gm_SetDbPauseFlag(int bit)
++{
++    gm_80479D58.unk_10.x0 |= 1ULL << bit;
++}
++
++void gm_ClearDbPauseFlag(int bit)
++{
++    gm_80479D58.unk_10.x0 &= ~(1ULL << bit);
++}
++
++bool gm_801A46B8(int bit)
++{
++    return gm_80479D58.unk_10.x2 & (1ULL << bit);
++}
++
++bool fn_801A46F4(void)
++{
++    int i;
++    for (i = 0; i < PAD_MAX_CONTROLLERS; i++) {
++        HSD_PadStatus* pad = &HSD_PadMasterStatus[(u8) i];
++        if (pad->err == 0 && (pad->trigger & HSD_PAD_DPADUP) &&
++            (pad->button & HSD_PAD_X))
++        {
++            return true;
++        }
++    }
++    return false;
++}
++
++bool fn_801A47E4(void)
++{
++    int i;
++    for (i = 0; i < PAD_MAX_CONTROLLERS; i++) {
++        HSD_PadStatus* pad = &HSD_PadMasterStatus[(u8) i];
++        if (pad->err == 0 && (pad->trigger & HSD_PAD_Z)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++u64 gm_801A48A4(u8 arg0)
++{
++    int i;
++    u64 result = 0;
++
++    for (i = 0; i < ARRAY_SIZE(gm_803DA888); i++) {
++        if (arg0 & 1) {
++            result |= gm_803DA888[i];
++        }
++        arg0 >>= 1;
++    }
++
++    return result;
++}
++
++void gm_801A4970(struct gm_DbPauseInputHandlers* db_input)
++{
++    HSD_PadStatus* temp_r3;
++    s8 var_r26;
++    s8* temp_r4;
++    u64 temp_ret;
++    int i;
++    PAD_STACK(8);
++
++    var_r26 = 0;
++    for (i = 0; i < PAD_MAX_CONTROLLERS; i++) {
 +#ifdef MU_NATIVE
 +        /* TM-CE HSD_Update Tweak / Check for DBLevel (801A49A8): no dump outside the debug ROM */
 +        if (mu_tmce_active() && DbLevel < DbLKind_DebugRom) {
 +            break;
 +        }
 +#endif
-         temp_r3 = &HSD_PadMasterStatus[(u8) i];
-         if ((temp_r3->trigger & HSD_PAD_DPADRIGHT) &&
-             (temp_r3->button & HSD_PAD_X))
-@@ -151,6 +176,14 @@ void gm_SetDbPauseInputHandlers(Predicate check_db_pause,
- {
-     gm_80479D58.unk_10.db_input.check_pause = check_db_pause;
-     gm_80479D58.unk_10.db_input.check_framestep = check_db_framestep;
++        temp_r3 = &HSD_PadMasterStatus[(u8) i];
++        if ((temp_r3->trigger & HSD_PAD_DPADRIGHT) &&
++            (temp_r3->button & HSD_PAD_X))
++        {
++            lbHeap_80015DF8();
++            OSReport("[hsdDumpClassStat] -- Report --\n");
++            hsdDumpClassStat(NULL, 0, 1);
++            OSReport("\n");
++            OSReport("[HSD_ObjDumpStat] -- Report --\n");
++            HSD_ObjDumpStat();
++            OSReport("\n");
++            db_PrintEntityCounts();
++            db_PrintThreadInfo();
++            HSD_Leak_80387DF8(0);
++            if (gm_804D6728 != NULL) {
++                gm_801653C8(gm_804D6728);
++                gm_804D6728 = NULL;
++            } else {
++                gm_804D6728 = gm_80165388(0x19, 0x3F, 0, 0xFE);
++                if (gm_804D6724 != NULL) {
++                    gm_804D6724();
++                }
++            }
++        }
++    }
++
++    if (db_input->check_pause != NULL && db_input->check_pause()) {
++        if (gm_GetDbPauseFlag(0)) {
++            gm_80479D58.unk_10.x0 &= ~1;
++        } else {
++            gm_80479D58.unk_10.x0 |= 1;
++        }
++    }
++    if (gm_GetDbPauseFlag(0)) {
++        if (db_input->check_framestep != NULL && db_input->check_framestep()) {
++            gm_80479D58.unk_10.x2 |= 1;
++        }
++    }
++}
++
++void gm_SetDbPauseInputHandlers(Predicate check_db_pause,
++                                Predicate check_db_framestep)
++{
++    gm_80479D58.unk_10.db_input.check_pause = check_db_pause;
++    gm_80479D58.unk_10.db_input.check_framestep = check_db_framestep;
 +#ifdef MU_NATIVE
 +    /* TM-CE HSD_Update Tweak / Clear HSDUpdate for no Debug (801A4B14, 801A4C08): outside the
 +     * debug ROM only TM-CE's own pause and frame advance handlers run */
@@ -115824,41 +115971,135 @@ index be743ad04..edc59ef3e 100644
 +        gm_80479D58.unk_10.db_input.check_framestep = NULL;
 +    }
 +#endif
- }
- 
- void gm_801A4B1C(void)
-@@ -221,16 +254,22 @@ void gm_801A4BD4(void)
-     gm_801A4B50(0);
- 
-     lb_80019880(OSSecondsToTicks(1.0F / GM_FPS));
--    HSD_GObj_803912E0(&gm_80479D48.initdata);
--    gm_80479D48.initdata.gproc_pri_max = 0x18;
++}
++
++void gm_801A4B1C(void)
++{
++    gm_SetDbPauseInputHandlers(fn_801A46F4, fn_801A47E4);
++}
++
++void gm_SetPreGObjProcCallback(Event cb)
++{
++    gm_80479D58.unk_10.pre_gobj_proc = cb;
++}
++
++void gm_801A4B50(int arg0)
++{
++    gm_80479D58.unk_10.unk_34 = arg0;
++}
++
++void gm_801A4B60(void)
++{
++    gm_80479D58.unk_C = 1;
++}
++
++void gm_801A4B74(void)
++{
++    gm_80479D58.unk_C = 2;
++}
++
++void gm_801A4B88(struct GameSceneInfo* info)
++{
++    gm_804D6720 = info;
++}
++
++/// @brief returns a pointer to the current scenes enter data
++void* gm_GetCurrentSceneEnterData(void)
++{
++    return gm_804D6720->enter_data;
++}
++
++/// @brief returns a pointer to the current scenes exit data
++void* gm_GetCurrentSceneExitData(void)
++{
++    return gm_804D6720->exit_data;
++}
++
++u32 gm_801A4BA8(void)
++{
++    return gm_80479D58.unk_0;
++}
++
++u32 gm_801A4BB8(void)
++{
++    return gm_80479D58.unk_8;
++}
++
++HSD_GObj* gm_801A4BC8(void)
++{
++    return gm_804D672C;
++}
++
++void fn_801A4BD0(HSD_GObj* gobj) {}
++
++void gm_801A4BD4(void)
++{
++    PAD_STACK(0x18);
++
++    gm_SetDbPauseInputHandlers(fn_801A46F4, fn_801A47E4);
++    gm_SetPreGObjProcCallback(NULL);
++    gm_801A4B50(0);
++
++    lb_80019880(OSSecondsToTicks(1.0F / GM_FPS));
 +    HSD_GObjSetInitDefaults(&gobj_init_data);
 +    gobj_init_data.gproc_pri_max = 0x18;
-     HSD_SObjLib_804D7960 =
--        HSD_GObj_803912A8(&gm_80479D48.initdata, &HSD_SObjLib_8040C3A4);
++    HSD_SObjLib_804D7960 =
 +        HSD_GObj_803912A8(&gobj_init_data, &HSD_SObjLib_8040C3A4);
-     HSD_SObjLib_803A44A4();
--    gm_80479D48.initdata.unk_2 = &gm_80479D58.unk_10.unk_28;
--    HSD_GObj_80391304(&gm_80479D48.initdata);
++    HSD_SObjLib_803A44A4();
 +    gobj_init_data.unk_2 = &gm_80479D58.unk_10.unk_28;
 +    HSD_GObjInit(&gobj_init_data);
-     hsd_80392474();
-     un_802FF78C();
-     gm_804D672C = GObj_Create(14, 0, 0);
++    hsd_80392474();
++    un_802FF78C();
++    gm_804D672C = GObj_Create(14, 0, 0);
 +#ifdef MU_NATIVE
 +    /* Training Mode CE OnSceneChange (TM-CE hook at 801A4C94): each scene's objects start here. */
 +    if (mu_tmce_active()) {
 +        mu_tmce_on_scene_change();
 +    }
 +#endif
-     if (gm_804D672C != NULL) {
-         HSD_GObj_SetupProc(gm_804D672C, fn_801A4BD0, 0);
-     }
-@@ -274,18 +313,38 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-     gm_801677C0(&temp_r25->unk_10);
-     gm_80479D58.unk_0 = 0;
-     gm_80479D58.unk_4 = 0;
++    if (gm_804D672C != NULL) {
++        HSD_GObj_SetupProc(gm_804D672C, fn_801A4BD0, 0);
++    }
++    gm_804D6728 = NULL;
++    gm_804D6724 = NULL;
++    gm_801A3E88();
++    lbAudioAx_8002835C();
++    lb_80014534();
++}
++
++GameScene* gm_FindGameSceneHandler(u8 kind)
++{
++    GameScene* cur;
++    for (cur = gm_GetAllGameScenes(); cur->kind != GS_COUNT; cur++) {
++        if (cur->kind == kind) {
++            return cur;
++        }
++    }
++    return NULL;
++}
++
++static inline u64 maybe_gm_801A48A4(u8 i)
++{
++    u64 temp_ret = gm_801A48A4(i);
++    if (gm_80479D58.unk_10.unk_38_0) {
++        return temp_ret;
++    } else {
++        return -1ULL;
++    }
++}
++
++void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
++{
++    int pad_queue_count;
++    int i;
++    struct gm_80479D58_t* temp_r25;
++
++    PAD_STACK(28);
++
++    temp_r25 = &gm_80479D58;
++    gm_801677C0(&temp_r25->unk_10);
++    gm_80479D58.unk_0 = 0;
++    gm_80479D58.unk_4 = 0;
 +#ifdef MU_NATIVE
 +    if (mu_css_origin_resume(4)) {
 +        i = 0;
@@ -115866,16 +116107,15 @@ index be743ad04..edc59ef3e 100644
 +        goto mu_origin_body;
 +    }
 +#endif
-     gm_80479D58.unk_8 = 0;
-     gm_80479D58.unk_C = 0;
-     HSD_PadFlushQueue(HSD_PAD_FLUSH_QUEUE_LEAVE1);
--    lb_8001CF18();
++    gm_80479D58.unk_8 = 0;
++    gm_80479D58.unk_C = 0;
++    HSD_PadFlushQueue(HSD_PAD_FLUSH_QUEUE_LEAVE1);
 +    lbCardGame_InitScene();
- 
-     while (temp_r25->unk_C == 0) {
-         hsd_80392E80();
-         gmMainLib_8046B0F0.xC = false;
- 
++
++    while (temp_r25->unk_C == 0) {
++        hsd_80392E80();
++        gmMainLib_8046B0F0.xC = false;
++
 +#ifdef MU_NATIVE
 +        /* Slippi online, ForceEngineOnRollback: a rollback drives the engine without a new pad
 +         * sample. Offline this is the plain wait. */
@@ -115888,21 +116128,22 @@ index be743ad04..edc59ef3e 100644
 +            lb_800195D0();
 +        }
 +#else
-         while ((pad_queue_count = lb_80019894()) == 0) {
-             lb_800195D0();
-         }
++        while ((pad_queue_count = lb_80019894()) == 0) {
++            lb_800195D0();
++        }
 +#endif
-         lb_800195D0();
- 
-         if (HSD_PadGetResetSwitch()) {
-@@ -294,11 +353,35 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-         }
- 
-         for (i = 0; i < pad_queue_count; i++) {
++        lb_800195D0();
++
++        if (HSD_PadGetResetSwitch()) {
++            gmMainLib_8046B0F0.resetting = true;
++            break;
++        }
++
++        for (i = 0; i < pad_queue_count; i++) {
 +#ifdef MU_NATIVE
 +        mu_online_body:
 +#endif
-             HSD_PerfSetStartTime();
++            HSD_PerfSetStartTime();
 +#ifdef MU_NATIVE
 +            /* Slippi online, StartEngineLoop: rollback loads, checksums, savestates. */
 +            mu_online_frame_begin();
@@ -115913,29 +116154,33 @@ index be743ad04..edc59ef3e 100644
 +            /* Replay playback: the viewer's pause, speed and jumps (shim/mu_replay.c). */
 +            mu_replay_frame_begin();
 +#endif
-             lb_800198E0();
--            if (DbLevel >= DbLKind_DebugRom) {
++            lb_800198E0();
 +            /* TM-CE HSD_Update Tweak / Always Run Debug Update (801A4DF4) */
 +            if (DbLevel >= DbLKind_DebugRom
 +#ifdef MU_NATIVE
 +                || mu_tmce_active()
 +#endif
 +            ) {
-                 gm_801A4970(&temp_r25->unk_10.db_input);
-             }
++                gm_801A4970(&temp_r25->unk_10.db_input);
++            }
 +#if MU_ROGUE  /* rogueMelee + Melee Maker */
 +            if (mu_bm_maker()) {
 +                extern void BAM_TrainingLoop(void);
 +                BAM_TrainingLoop();
 +            }
 +#endif
-             if (gm_801A46B8(0) || !gm_GetDbPauseFlag(0)) {
-                 temp_r25->unk_10.unk_38_0 = true;
-             } else {
-@@ -311,6 +394,15 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-                 }
-                 if (lb_80019A30(0) && on_frame != NULL) {
-                     on_frame();
++            if (gm_801A46B8(0) || !gm_GetDbPauseFlag(0)) {
++                temp_r25->unk_10.unk_38_0 = true;
++            } else {
++                temp_r25->unk_10.unk_38_0 = false;
++            }
++            if (gm_80479D58.unk_10.unk_38_0) {
++                lb_80019900();
++                if (lb_80019A30(0)) {
++                    gm_EvaluateAllControllerInputs();
++                }
++                if (lb_80019A30(0) && on_frame != NULL) {
++                    on_frame();
 +#if MU_ROGUE  /* rogueMelee */
 +                    RogueHooks_OnFrame();
 +#endif
@@ -115945,35 +116190,53 @@ index be743ad04..edc59ef3e 100644
 +                        BAM_OnFrame();
 +                    }
 +#endif
-                 }
-             }
-             if (gm_80479D58.unk_10.x0 != gm_80479D58.unk_10.x1 ||
-@@ -331,14 +423,19 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-                 temp_r25->unk_10.unk_28 |=
-                     ~gm_803DA8C8[temp_r25->unk_10.unk_34];
-             }
--            if (DbLevel >= DbLKind_DebugRom) {
++                }
++            }
++            if (gm_80479D58.unk_10.x0 != gm_80479D58.unk_10.x1 ||
++                temp_r25->unk_10.x2 != temp_r25->unk_10.x3)
++            {
++                temp_r25->unk_10.unk_20 =
++                    maybe_gm_801A48A4(temp_r25->unk_10.x0);
++                temp_r25->unk_10.x1 = temp_r25->unk_10.x0;
++                temp_r25->unk_10.x3 = temp_r25->unk_10.x2;
++                temp_r25->unk_10.x2 = 0;
++            }
++            temp_r25->unk_10.unk_28 = temp_r25->unk_10.unk_20;
++            if (!lb_80019A30(0)) {
++                temp_r25->unk_10.unk_28 |=
++                    gm_803DA8C8[temp_r25->unk_10.unk_34];
++            }
++            if (!lb_80019A30(1)) {
++                temp_r25->unk_10.unk_28 |=
++                    ~gm_803DA8C8[temp_r25->unk_10.unk_34];
++            }
 +            /* TM-CE Disable USB Screenshot (801A5070) */
 +            if (DbLevel >= DbLKind_DebugRom
 +#ifdef MU_NATIVE
 +                && !mu_tmce_active()
 +#endif
 +            ) {
-                 db_CheckScreenshot();
-             }
-             lbAudioAx_80027DF8();
-             if (temp_r25->unk_10.pre_gobj_proc != NULL) {
-                 temp_r25->unk_10.pre_gobj_proc();
-             }
--            HSD_GObj_80390CFC();
++                db_CheckScreenshot();
++            }
++            lbAudioAx_80027DF8();
++            if (temp_r25->unk_10.pre_gobj_proc != NULL) {
++                temp_r25->unk_10.pre_gobj_proc();
++            }
 +            HSD_GObj_RunProcs();
-             if (temp_r25->unk_0 != -2) {
-                 temp_r25->unk_0++;
-             }
-@@ -353,9 +450,35 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-             }
-             gmMainLib_8046B0F0.xC = false;
-             if (temp_r25->unk_C != 0) {
++            if (temp_r25->unk_0 != -2) {
++                temp_r25->unk_0++;
++            }
++            if (gm_80479D58.unk_10.unk_38_0 && lb_80019A30(0)) {
++                if (temp_r25->unk_8 != -2) {
++                    temp_r25->unk_8++;
++                }
++            }
++            HSD_PerfSetCPUTime();
++            if (DbLevel >= DbLKind_DebugRom) {
++                OSCheckActiveThreads();
++            }
++            gmMainLib_8046B0F0.xC = false;
++            if (temp_r25->unk_C != 0) {
 +#ifdef MU_NATIVE
 +                /* Console rollback commits causal inputs before the scene can tear down. */
 +                if (mu_online_scene_terminal()) {
@@ -115993,38 +116256,44 @@ index be743ad04..edc59ef3e 100644
 +                i++;
 +                goto mu_online_rollback_done;
 +            default:
-                 break;
-             }
++                break;
++            }
 +#endif
-         }
++        }
 +#ifdef MU_NATIVE
 +    mu_online_rollback_done:
 +#endif
 +#ifdef MU_NATIVE
 +        if (mu_css_origin_skip_draw()) continue;
 +#endif
-         if (temp_r25->unk_C == 2) {
-             break;
-         }
-@@ -368,6 +491,9 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-         HSD_Init_803755A8();
-         HSD_PerfSetDrawTime();
-         HSD_VICopyXFBAsync(HSD_RP_SCREEN);
++        if (temp_r25->unk_C == 2) {
++            break;
++        }
++
++        lb_800195D0();
++        GXInvalidateVtxCache();
++        GXInvalidateTexAll();
++        HSD_StartRender(HSD_RP_SCREEN);
++        HSD_GObj_80390FC0();
++        HSD_Init_803755A8();
++        HSD_PerfSetDrawTime();
++        HSD_VICopyXFBAsync(HSD_RP_SCREEN);
 +#ifdef MU_NATIVE
 +        mu_hud_report();   /* player tags, damage and stocks for the host's overlays */
++        mu_rui_publish_frame();   /* optional Redesigned UI display snapshot */
 +#endif
-         if (temp_r25->unk_4 != -2U) {
-             temp_r25->unk_4++;
-         }
-@@ -375,5 +501,14 @@ void gm_801A4D34(void (*on_frame)(void), UNUSED GameSceneInfo* info)
-         HSD_PerfSetTotalTime();
-         HSD_PerfInitStat();
-     }
++        if (temp_r25->unk_4 != -2U) {
++            temp_r25->unk_4++;
++        }
++        db_TakeScreenshotIfPending();
++        HSD_PerfSetTotalTime();
++        HSD_PerfInitStat();
++    }
 +#ifdef MU_NATIVE
 +    mu_online_scene_loop_exit();
 +#endif
-     HSD_VIWaitXFBFlush();
- }
++    HSD_VIWaitXFBFlush();
++}
 +
 +#ifdef MU_NATIVE
 +/* Training Mode CE (native build, sourceport/game/tmce) reads these file-private objects by their
@@ -117244,10 +117513,10 @@ index 4435d6102..594df06dd 100644
  
  void gm_Mode_TinyVs_OnLoad(void)
 diff --git a/src/melee/gm/gmtitle.c b/src/melee/gm/gmtitle.c
-index 6874bd24a..a6cd62413 100644
+index 6874bd24a..e1bfa29b8 100644
 --- a/src/melee/gm/gmtitle.c
 +++ b/src/melee/gm/gmtitle.c
-@@ -28,15 +28,31 @@
+@@ -28,26 +28,54 @@
  #include <sysdolphin/baselib/random.h>
  #include <sysdolphin/baselib/sislib.h>
  
@@ -117282,7 +117551,60 @@ index 6874bd24a..a6cd62413 100644
  static HSD_FogDesc* fog_desc;
  static int countdown_timer;
  static u32 frame_count;
-@@ -172,7 +188,7 @@ HSD_GObj* gmTitle_801A165C(void)
+ static GXBool bg_initialized;
++#ifdef MU_NATIVE
++static void mu_rui_title_logo_render(HSD_GObj* gobj, intptr_t pass)
++{
++    if (mu_rui_title_active()) {
++        return;
++    }
++    HSD_GObj_JObjCallback(gobj, pass);
++}
++#define MU_TITLE_LOGO_RENDER mu_rui_title_logo_render
++#else
++#define MU_TITLE_LOGO_RENDER HSD_GObj_JObjCallback
++#endif
+ 
+ HSD_GObj* gmTitle_801A12C4(void)
+ {
+     HSD_GObj* gobj = GObj_Create(HSD_GOBJ_CLASS_UI, 15, 0);
+     HSD_JObj* jobj = HSD_JObjLoadJoint(model_desc_0.joint);
+     HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
+-    GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 9, 0);
++    GObj_SetupGXLink(gobj, MU_TITLE_LOGO_RENDER, 9, 0);
+     HSD_JObjAddAnimAll(jobj, model_desc_0.animjoint,
+                        model_desc_0.matanim_joint,
+                        model_desc_0.shapeanim_joint);
+@@ -104,6 +132,9 @@ static void fn_801A1498_inline(void)
+ static void fn_801A1498(HSD_GObj* gobj)
+ {
+     HSD_JObj* jobj = GET_JOBJ(gobj);
++#ifdef MU_NATIVE
++    mu_rui_note_title(bg_initialized == GX_TRUE ? 1 : 0, bg_initialized == GX_FALSE ? 1 : 0);
++#endif
+     if (gm_804D67EC > 5400) {
+         mn_8022ED6C(jobj, &loop_settings_0);
+     } else {
+@@ -121,6 +152,9 @@ static void fn_801A1498(HSD_GObj* gobj)
+ 
+ static void gmTitle_801A1630(HSD_GObj* gobj)
+ {
++#ifdef MU_NATIVE
++    mu_rui_note_title(1, bg_initialized == GX_TRUE ? 1 : 0);
++#endif
+     mn_8022ED6C(GET_JOBJ(gobj), &loop_settings_0);
+ }
+ 
+@@ -140,7 +174,7 @@ HSD_GObj* gmTitle_801A165C(void)
+     u8 kind = HSD_GObj_JObjKind;
+ 
+     HSD_GObjObject_80390A70(gobj, kind, jobj);
+-    GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 9, 0);
++    GObj_SetupGXLink(gobj, MU_TITLE_LOGO_RENDER, 9, 0);
+     HSD_JObjAddAnimAll(jobj, model_desc_0.animjoint,
+                        model_desc_0.matanim_joint,
+                        model_desc_0.shapeanim_joint);
+@@ -172,7 +206,7 @@ HSD_GObj* gmTitle_801A165C(void)
      return gobj;
  }
  
@@ -117291,7 +117613,7 @@ index 6874bd24a..a6cd62413 100644
  {
      HSD_CObj* cobj = GET_COBJ(gobj);
      if (HSD_CObjSetCurrent(GET_COBJ(gobj))) {
-@@ -190,7 +206,7 @@ void gmTitle_801A185C(void)
+@@ -190,7 +224,7 @@ void gmTitle_801A185C(void)
      gobj->gxlink_prios = 0x209;
  }
  
@@ -117300,7 +117622,7 @@ index 6874bd24a..a6cd62413 100644
  {
      GXColor erase_color = fog_desc->color;
      if (HSD_CObjSetCurrent(GET_COBJ(gobj))) {
-@@ -252,13 +268,17 @@ HSD_Archive* gmTitle_801A1AC0(void)
+@@ -252,13 +286,17 @@ HSD_Archive* gmTitle_801A1AC0(void)
          "TtlBg_Top_matanim_joint", &model_desc_1.shapeanim_joint,
          "TtlBg_Top_shapeanim_joint",
  
@@ -141133,10 +141455,27 @@ index 4a0b8b70c..4044ad816 100644
  
  struct UnkArchiveStruct {
 diff --git a/src/melee/if/if_2F6E.c b/src/melee/if/if_2F6E.c
-index eda24277d..854bc6b68 100644
+index eda24277d..36488ca01 100644
 --- a/src/melee/if/if_2F6E.c
 +++ b/src/melee/if/if_2F6E.c
-@@ -57,9 +57,20 @@ void ifStatus_802F6EA4(int arg0, int arg1, int arg2, int arg3, Event arg4,
+@@ -28,6 +28,16 @@
+     { NULL, 0, if_802F74D0, 0x9C46U, 0, 0, { 0 }, 0, NULL, NULL, 0, 0 },
+ };
+ 
++#ifdef MU_NATIVE
++static void mu_rui_banner_render(HSD_GObj* gobj, intptr_t pass)
++{
++    if (mu_rui_hud_active()) {
++        return;
++    }
++    HSD_GObj_JObjCallback(gobj, pass);
++}
++#endif
++
+ void ifStatus_802F6EA4(int arg0, int arg1, int arg2, int arg3, Event arg4,
+                        Event arg5)
+ {
+@@ -57,10 +67,24 @@ void ifStatus_802F6EA4(int arg0, int arg1, int arg2, int arg3, Event arg4,
              HSD_GObjFree(e->x0);
          }
          gobj = GObj_Create(0xE, 0xE, 0);
@@ -141151,14 +141490,18 @@ index eda24277d..854bc6b68 100644
          lb_80011C18(jobj, 0x08000000);
          HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
 +#ifdef MU_NATIVE
++        mu_rui_note_banner(arg0);
 +        /* Community code "No GO! at the start" (gadzook): GO! is element 4. It is still made and
 +         * animated, with its sound; it is only never drawn. */
 +        if (!(arg0 == 4 && mu_code_feature(MU_DISPLAY_NO_GO_TEXT)))
-+#endif
++        GObj_SetupGXLink(gobj, mu_rui_banner_render, 0xB, 0);
++#else
          GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 0xB, 0);
++#endif
          if (e->x8 != NULL) {
              HSD_GObj_SetupProc(gobj, e->x8, 0);
-@@ -85,29 +96,29 @@ void ifStatus_802F7034(UNK_T arg0)
+         }
+@@ -85,29 +109,29 @@ void ifStatus_802F7034(UNK_T arg0)
      u8 unkB;
      u8 mr;
  
@@ -141197,7 +141540,7 @@ index eda24277d..854bc6b68 100644
      if (mr == OUTCOME_TIMEOUT) {
          ifStatus_802F6EA4(0, a, b, c, arg0, NULL);
          return;
-@@ -127,7 +138,7 @@ void ifStatus_802F7134(void)
+@@ -127,7 +151,7 @@ void ifStatus_802F7134(void)
  {
      u8 _[8];
      HSD_Archive** archive;
@@ -141206,7 +141549,7 @@ index eda24277d..854bc6b68 100644
      int i;
  
      for (i = 0; i < 8; i++) {
-@@ -137,10 +148,10 @@ void ifStatus_802F7134(void)
+@@ -137,10 +161,10 @@ void ifStatus_802F7134(void)
  
      archive = ifAll_GetArchive();
      lbArchive_LoadSections(*archive, (void**) &models, "ScInfCnt_scene_models",
@@ -145501,7 +145844,7 @@ index 8020cdad3..413b811a1 100644
          HSD_SisLib_803A62A0(2, "SdPrize.usd", "SIS_PrizeData");
      } else {
 diff --git a/src/melee/if/ifstatus.c b/src/melee/if/ifstatus.c
-index a6068103c..c6e8250d2 100644
+index a6068103c..321231dcd 100644
 --- a/src/melee/if/ifstatus.c
 +++ b/src/melee/if/ifstatus.c
 @@ -26,29 +26,9 @@
@@ -145745,7 +146088,7 @@ index a6068103c..c6e8250d2 100644
 +void ifStatus_802F5DE0(HSD_GObj* player, intptr_t arg1)
  {
 +#ifdef MU_NATIVE
-+    if (mu_hud_percents_hidden()) {   /* Damage percents: Hidden (only the draw) */
++    if (mu_hud_percents_hidden() || mu_rui_hud_active()) {   /* Damage percents: Hidden / Redesigned UI (only the draw) */
 +        return;
 +    }
 +#endif
@@ -145767,7 +146110,7 @@ index a6068103c..c6e8250d2 100644
 +#ifdef MU_NATIVE
 +    /* "Hide emblems behind percents": only the draw is left out; the emblem is still made and
 +     * animated, so nothing else in the game changes. */
-+    if (mu_hud_emblems_hidden() || mu_hud_percents_hidden()) {
++    if (mu_hud_emblems_hidden() || mu_hud_percents_hidden() || mu_rui_hud_active()) {
 +        return;
 +    }
 +    mu_hud_fade(gobj);   /* HUD Transparency (community code) */
@@ -146065,7 +146408,7 @@ index 4fa8c0fce..4e2796f35 100644
  /* 2F6508 */ void ifStatus_802F6508(s32);
  /* 2F665C */ void ifStatus_802F665C(int);
 diff --git a/src/melee/if/ifstock.c b/src/melee/if/ifstock.c
-index 5096c7826..3ca5d7aa5 100644
+index 5096c7826..a3b4cb825 100644
 --- a/src/melee/if/ifstock.c
 +++ b/src/melee/if/ifstock.c
 @@ -1,3 +1,7 @@
@@ -146168,7 +146511,7 @@ index 5096c7826..3ca5d7aa5 100644
              HSD_AObjSetRate(jobj2->u.dobj->mobj->tobj->aobj, 0.0f);
          }
      } else {
-@@ -492,16 +542,19 @@ void fn_802F9410(HSD_GObj* gobj)
+@@ -492,34 +542,57 @@ void fn_802F9410(HSD_GObj* gobj)
      }
  }
  
@@ -146177,6 +146520,11 @@ index 5096c7826..3ca5d7aa5 100644
  {
      struct IfStockUserData* p = GET_IFSTOCK(gobj);
      struct HudIndex* x = ifStatus_GetHUDInfo();
++#ifdef MU_NATIVE
++    if (mu_rui_hud_active()) {
++        return;
++    }
++#endif
      if (!x->players[p->player].flags.hide_all_digits) {
 +#ifdef MU_NATIVE
 +        mu_hud_scale(gobj, 1);   /* stock icon size (settings panel) */
@@ -146189,8 +146537,13 @@ index 5096c7826..3ca5d7aa5 100644
 +void fn_802F9548(HSD_GObj* gobj, intptr_t renderpass)
  {
      struct HudIndex* x = ifStatus_GetHUDInfo();
++#ifdef MU_NATIVE
++    if (mu_rui_hud_active()) {
++        return;
++    }
++#endif
      if (!x->players[0].flags.hide_all_digits) {
-@@ -509,7 +562,7 @@ void fn_802F9548(HSD_GObj* gobj, int renderpass)
+         HSD_GObj_JObjCallback(gobj, renderpass);
      }
  }
  
@@ -146198,8 +146551,13 @@ index 5096c7826..3ca5d7aa5 100644
 +void fn_802F9598(HSD_GObj* gobj, intptr_t renderpass)
  {
      struct HudIndex* x = ifStatus_GetHUDInfo();
++#ifdef MU_NATIVE
++    if (mu_rui_hud_active()) {
++        return;
++    }
++#endif
      if (!x->players[0].flags.hide_all_digits) {
-@@ -517,7 +570,7 @@ void fn_802F9598(HSD_GObj* gobj, int renderpass)
+         HSD_GObj_JObjCallback(gobj, renderpass);
      }
  }
  
@@ -146207,8 +146565,15 @@ index 5096c7826..3ca5d7aa5 100644
 +void fn_802F95E8(HSD_GObj* gobj, intptr_t renderpass)
  {
      struct HudIndex* x = ifStatus_GetHUDInfo();
++#ifdef MU_NATIVE
++    if (mu_rui_hud_active()) {
++        return;
++    }
++#endif
      if (gm_8016B184() && gm_8016A1F8() &&
-@@ -530,7 +583,7 @@ void fn_802F95E8(HSD_GObj* gobj, int renderpass)
+         !(x->players[0].flags.hide_all_digits |
+           x->players[1].flags.hide_all_digits |
+@@ -530,9 +603,14 @@ void fn_802F95E8(HSD_GObj* gobj, int renderpass)
      }
  }
  
@@ -146216,8 +146581,15 @@ index 5096c7826..3ca5d7aa5 100644
 +void fn_802F9680(HSD_GObj* gobj, intptr_t renderpass)
  {
      struct HudIndex* x = ifStatus_GetHUDInfo();
++#ifdef MU_NATIVE
++    if (mu_rui_hud_active()) {
++        return;
++    }
++#endif
      if (!x->players[0].flags.hide_all_digits) {
-@@ -542,16 +595,32 @@ HSD_GObj* ifStock_802F96D0(int a, int b, float x, float y)
+         HSD_GObj_JObjCallback(gobj, renderpass);
+     }
+@@ -542,16 +620,32 @@ HSD_GObj* ifStock_802F96D0(int a, int b, float x, float y)
  {
      struct ifStock_804A1378* q = &ifStock_804A1378;
      HSD_GObj* gobj = GObj_Create(14, 15, 0);
@@ -146252,7 +146624,7 @@ index 5096c7826..3ca5d7aa5 100644
      HSD_JObjReqAnimAll(jobj, 0.0f);
      HSD_TObjReqAnimAll(jobj2->u.dobj->mobj->tobj, gm_80168B34(a, 0, b));
      HSD_AObjSetRate(jobj2->u.dobj->mobj->tobj->aobj, 0.0f);
-@@ -560,7 +629,7 @@ HSD_GObj* ifStock_802F96D0(int a, int b, float x, float y)
+@@ -560,7 +654,7 @@ HSD_GObj* ifStock_802F96D0(int a, int b, float x, float y)
  }
  
  static inline struct lbl_8046B6A0_FighterMatchInfoFlags*
@@ -146261,7 +146633,7 @@ index 5096c7826..3ca5d7aa5 100644
  {
      return &data->fighters[player].flags;
  }
-@@ -583,7 +652,7 @@ void ifStock_802F98E8(u8 player, u8 b)
+@@ -583,7 +677,7 @@ void ifStock_802F98E8(u8 player, u8 b)
      HSD_JObj* jobj;
      int* stocks;
      int i;
@@ -146270,7 +146642,7 @@ index 5096c7826..3ca5d7aa5 100644
      HSD_JObj* icon_jobj;
      GXColor c2;
      GXColor c1;
-@@ -599,14 +668,31 @@ void ifStock_802F98E8(u8 player, u8 b)
+@@ -599,14 +693,31 @@ void ifStock_802F98E8(u8 player, u8 b)
          gobj = GObj_Create(14, 15, 0);
          gobj->user_data = ifStock_802F98E8_get_data(stock, player);
          if (gobj != NULL) {
@@ -146304,7 +146676,7 @@ index 5096c7826..3ca5d7aa5 100644
                  lb_80011E24(jobj, ifStock_804A1378.player[player].x4, 0, 1, 2,
                              3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
                              -1);
-@@ -722,10 +808,10 @@ void ifStock_802F98E8(u8 player, u8 b)
+@@ -722,10 +833,10 @@ void ifStock_802F98E8(u8 player, u8 b)
                      break;
                  }
                  HSD_JObjAnimAll(jobj);
@@ -146317,7 +146689,7 @@ index 5096c7826..3ca5d7aa5 100644
                      if (match_info->x4_b1) {
                          GXColor* color;
                          c1 = ifStock_802F98E8_color1;
-@@ -746,15 +832,16 @@ void ifStock_802F98E8(u8 player, u8 b)
+@@ -746,15 +857,16 @@ void ifStock_802F98E8(u8 player, u8 b)
      }
  }
  
@@ -146337,7 +146709,7 @@ index 5096c7826..3ca5d7aa5 100644
      lb_80011E24(jobj, &jobj2, 1, -1);
      if (!arg) {
          HSD_GObj_SetupProc(gobj, fn_802F8E08, 17);
-@@ -762,6 +849,22 @@ static inline HSD_GObj* ifStock_802F9F48_inline(int arg)
+@@ -762,6 +874,22 @@ static inline HSD_GObj* ifStock_802F9F48_inline(int arg)
      HSD_JObjSetTranslateZ(jobj, 10000.0f);
      HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
      HSD_JObjClearFlags(jobj2, JOBJ_HIDDEN);
@@ -146360,7 +146732,7 @@ index 5096c7826..3ca5d7aa5 100644
      HSD_JObjReqAnimAll(jobj, 0.0f);
      HSD_TObjReqAnimAll(
          jobj2->u.dobj->mobj->tobj,
-@@ -770,20 +873,17 @@ static inline HSD_GObj* ifStock_802F9F48_inline(int arg)
+@@ -770,20 +898,17 @@ static inline HSD_GObj* ifStock_802F9F48_inline(int arg)
      HSD_JObjAnimAll(jobj);
      return gobj;
  }
@@ -146384,7 +146756,7 @@ index 5096c7826..3ca5d7aa5 100644
      lb_80011E24(jobj, &jobj2, 1, -1);
      if (arg == 0) {
          HSD_GObj_SetupProc(gobj, fn_802F916C, 17);
-@@ -829,7 +929,7 @@ void ifStock_802FA5BC(int arg)
+@@ -829,7 +954,7 @@ void ifStock_802FA5BC(int arg)
  {
      struct ifStock_804A1378* q = &ifStock_804A1378;
      HSD_GObj* gobj = GObj_Create(14, 15, 0);
@@ -146393,7 +146765,7 @@ index 5096c7826..3ca5d7aa5 100644
      HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
      GObj_SetupGXLink(gobj, fn_802F9598, 11, 0);
      if (arg) {
-@@ -842,9 +942,6 @@ void ifStock_802FA5BC(int arg)
+@@ -842,9 +967,6 @@ void ifStock_802FA5BC(int arg)
      lb_80011E24(jobj, &ifStock_804A1378.jobj, 0, 1, 2, 3, 4, 5, -1);
  }
  
@@ -146403,7 +146775,7 @@ index 5096c7826..3ca5d7aa5 100644
  void fn_802FA6C4(HSD_GObj* arg)
  {
      int i;
-@@ -887,9 +984,6 @@ void fn_802FA6C4(HSD_GObj* arg)
+@@ -887,9 +1009,6 @@ void fn_802FA6C4(HSD_GObj* arg)
          ifStock_804A1774.x0 = 0;
      }
  }
@@ -146413,7 +146785,7 @@ index 5096c7826..3ca5d7aa5 100644
  
  void fn_802FA8C0(HSD_GObj* arg)
  {
-@@ -1014,7 +1108,7 @@ static inline void ifStock_CreateStockGObjs(HSD_GObj** slots)
+@@ -1014,7 +1133,7 @@ static inline void ifStock_CreateStockGObjs(HSD_GObj** slots)
      }
      if (gm_IsMultimanSmashMode()) {
          gobj = GObj_Create(14, 15, 0);
@@ -146422,7 +146794,7 @@ index 5096c7826..3ca5d7aa5 100644
          HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
          GObj_SetupGXLink(gobj, fn_802F9598, 11, 0);
          gm_8016895C(jobj, stock->x4, 0);
-@@ -1028,16 +1122,16 @@ static inline void ifStock_CreateStockGObjs(HSD_GObj** slots)
+@@ -1028,16 +1147,16 @@ static inline void ifStock_CreateStockGObjs(HSD_GObj** slots)
  void ifStock_802FAEC4(void)
  {
      struct ifStock_804A1378* stock = &ifStock_804A1378;
@@ -146465,10 +146837,10 @@ index 84dec076a..85e51409b 100644
  /* 2F98E8 */ void ifStock_802F98E8(u8, u8);
  /* 2F9F48 */ HSD_GObj* ifStock_802F9F48(int);
 diff --git a/src/melee/if/iftime.c b/src/melee/if/iftime.c
-index 01a904b92..4a2714437 100644
+index 01a904b92..0d9f03f56 100644
 --- a/src/melee/if/iftime.c
 +++ b/src/melee/if/iftime.c
-@@ -23,25 +23,25 @@ static struct ifTime_data {
+@@ -23,25 +23,37 @@ static struct ifTime_data {
      HSD_JObj* digits[10];
      unsigned char countdown_seconds;
      char pad31[0x38 - 0x31];
@@ -146476,6 +146848,18 @@ index 01a904b92..4a2714437 100644
 +    DISC_PTR(DynamicModelDesc)* countdown_timer_models;
  } ifTime_data;
  static DynamicModelDesc ifTime_match_timer_models;
++#ifdef MU_NATIVE
++static void mu_rui_time_render(HSD_GObj* gobj, intptr_t pass)
++{
++    if (mu_rui_hud_active()) {
++        return;
++    }
++    HSD_GObj_JObjCallback(gobj, pass);
++}
++#define MU_TIME_RENDER mu_rui_time_render
++#else
++#define MU_TIME_RENDER HSD_GObj_JObjCallback
++#endif
  
  static bool ifTime_LoadModels(void)
  {
@@ -146503,7 +146887,7 @@ index 01a904b92..4a2714437 100644
  }
  
  static inline void ifTime_SetDigit(HSD_JObj* jobj, unsigned int frame)
-@@ -173,7 +173,7 @@ void ifTime_UpdateCountdown(HSD_GObj* arg0)
+@@ -173,7 +185,7 @@ void ifTime_UpdateCountdown(HSD_GObj* arg0)
      if (f != x->countdown_seconds) {
          x->countdown_seconds = f;
          HSD_JObjRemoveAnimAll(jobj);
@@ -146512,7 +146896,7 @@ index 01a904b92..4a2714437 100644
          HSD_JObjReqAnimAll(jobj, 0.0f);
          HSD_JObjAnimAll(jobj);
      }
-@@ -204,7 +204,7 @@ void ifTime_UpdateTimers(HSD_GObj* arg0)
+@@ -204,16 +216,16 @@ void ifTime_UpdateTimers(HSD_GObj* arg0)
      ifTime_SetTime(jobj, seconds, centiseconds);
      if (gm_8016B110() == 0 && centiseconds == 0 && seconds == 5) {
          HSD_JObj* jobj2 =
@@ -146521,16 +146905,18 @@ index 01a904b92..4a2714437 100644
          if (jobj2 == NULL) {
              OSReport("Error : jobj dont't get (ifAddTimeDownModel)\n");
              OSPanic("iftime.c", 300, "");
-@@ -213,7 +213,7 @@ void ifTime_UpdateTimers(HSD_GObj* arg0)
+         }
+         tmp = HSD_GObj_JObjKind;
          HSD_GObjObject_80390A70(x->countdown_timer, tmp, jobj2);
-         GObj_SetupGXLink(x->countdown_timer, HSD_GObj_JObjCallback, 11, 0);
+-        GObj_SetupGXLink(x->countdown_timer, HSD_GObj_JObjCallback, 11, 0);
++        GObj_SetupGXLink(x->countdown_timer, MU_TIME_RENDER, 11, 0);
          x->countdown_seconds = ifTime_GetCountdownSeconds_dontinline();
 -        lb_8000C0E8(jobj2, x->countdown_seconds, x->countdown_timer_models[0]);
 +        lb_8000C0E8(jobj2, x->countdown_seconds, DP(x->countdown_timer_models[0]));
          HSD_JObjReqAnimAll(jobj2, 0.0f);
          HSD_JObjAnimAll(jobj2);
          HSD_JObjSetTranslate(jobj2, ifAll_GetTimerPosition());
-@@ -249,16 +249,16 @@ void ifTime_CreateTimers(void)
+@@ -249,16 +261,16 @@ void ifTime_CreateTimers(void)
              OSReport("Error : gobj dont't get (ifAddTime)\n");
              OSPanic("iftime.c", 383, "");
          }
@@ -146541,10 +146927,11 @@ index 01a904b92..4a2714437 100644
              OSPanic("iftime.c", 389, "");
          }
          HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
-         GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 11, 0);
+-        GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 11, 0);
 -        anims = ifTime_match_timer_models.anims;
 -        matanims = ifTime_match_timer_models.matanims;
 -        shapeanims = ifTime_match_timer_models.shapeanims;
++        GObj_SetupGXLink(gobj, MU_TIME_RENDER, 11, 0);
 +        anims = DP(ifTime_match_timer_models.anims);
 +        matanims = DP(ifTime_match_timer_models.matanims);
 +        shapeanims = DP(ifTime_match_timer_models.shapeanims);
@@ -178820,7 +179207,7 @@ index cfd3e0527..e6707a8ed 100644
 -#pragma pop
 -#endif
 diff --git a/src/melee/mn/mncharsel.c b/src/melee/mn/mncharsel.c
-index d580c0aa4..e7c15067c 100644
+index d580c0aa4..819df88a5 100644
 --- a/src/melee/mn/mncharsel.c
 +++ b/src/melee/mn/mncharsel.c
 @@ -1,4 +1,14 @@
@@ -178838,16 +179225,18 @@ index d580c0aa4..e7c15067c 100644
  
  #include <melee/ft/forward.h>
  #include <sysdolphin/baselib/forward.h>
-@@ -28,6 +38,8 @@
+@@ -27,7 +37,10 @@
+ #include <melee/lb/types.h>
  #include <sysdolphin/baselib/aobj.h>
  #include <sysdolphin/baselib/cobj.h>
++#include <sysdolphin/baselib/displayfunc.h>
  #include <sysdolphin/baselib/controller.h>
 +#include <melee/if/ifall.h>
 +#include <melee/pl/player.h>
  #include <sysdolphin/baselib/dobj.h>
  #include <sysdolphin/baselib/fog.h>
  #include <sysdolphin/baselib/gobj.h>
-@@ -41,6 +53,47 @@
+@@ -41,6 +54,55 @@
  #include <sysdolphin/baselib/mobj.h>
  #include <sysdolphin/baselib/random.h>
  #include <sysdolphin/baselib/sislib.h>
@@ -178873,6 +179262,14 @@ index d580c0aa4..e7c15067c 100644
 +static void mu_css_camera_render(HSD_GObj* gobj, intptr_t pass)
 +{
 +    u64 prios;
++    if (mu_rui_css_active()) {
++        if (HSD_CObjSetCurrent(gobj->hsd_obj)) {
++            HSD_SetEraseColor(10, 15, 24, 255);
++            HSD_CObjEraseScreen(gobj->hsd_obj, 1, 0, 1);
++            HSD_CObjEndCurrent();
++        }
++        return;
++    }
 +    if (!mu_slippi_css_online()) {
 +        HSD_GObj_803910D8(gobj, pass);
 +        return;
@@ -178895,7 +179292,7 @@ index d580c0aa4..e7c15067c 100644
  
  static u8 mnCharSel_804D50C8[4] = { 1, 2, 4, 8 };
  static u8 mnCharSel_804D50CC[4] = { 1, 0, 0, 2 };
-@@ -61,14 +114,18 @@ typedef struct MnSelectChrModels {
+@@ -61,14 +123,18 @@ typedef struct MnSelectChrModels {
  } MnSelectChrModels;
  
  typedef struct MnSelectChrDataTable {
@@ -178919,7 +179316,7 @@ index d580c0aa4..e7c15067c 100644
  static MnSelectChrDataTable* css_data_table;
  static HSD_GObj* mnCharSel_804D6CB8;
  static HSD_GObj* mnCharSel_804D6CBC;
-@@ -90,10 +147,18 @@ static u8 mnCharSel_804D6CF2;
+@@ -90,10 +156,18 @@ static u8 mnCharSel_804D6CF2;
  static u8 mnCharSel_804D6CF3;
  static s8 mnCharSel_804D6CF4;
  static u8 mnCharSel_804D6CF5; ///< number of (open? valid?) CSS doors
@@ -178938,7 +179335,7 @@ index d580c0aa4..e7c15067c 100644
  
  /// Can't be enum bc float, but reused values
  #define ICONROWHT_TOP_TOP 20.0F
-@@ -158,7 +223,14 @@ static CSSIconsData mnCharSel_803F0A48 = {
+@@ -158,7 +232,14 @@ static CSSIconsData mnCharSel_803F0A48 = {
      },
  };
  
@@ -178953,7 +179350,7 @@ index d580c0aa4..e7c15067c 100644
      // -------- Icons Top Row --------
  
      { // Dr. Mario -                      0x803F0B24
-@@ -268,6 +340,39 @@ static CSSIcon icons[25 + 1] = {
+@@ -268,6 +349,39 @@ static CSSIcon icons[25 + 1] = {
        ICONJOINT_EMBLEM, 0x000000DA, ICONBNDS_COL7_L, 23.6, ICONROWHT_BTM_TOP,
        ICONROWHT_BTM_BTM }
  };
@@ -178993,7 +179390,7 @@ index d580c0aa4..e7c15067c 100644
  
  static CSSDoorsData mnCharSel_803F0DFC = {
      { { 0x2E, 0x33, 0x38, 0x85, 0x29,  0xA6,  0x3D,  0x41,
-@@ -295,6 +400,197 @@ static struct CSSDoorsMisc mnCharSel_803F0EBC = {
+@@ -295,6 +409,197 @@ static struct CSSDoorsMisc mnCharSel_803F0EBC = {
      0x2F, 0x01, 0, 0, 0,    NULL, -10.9, -4.2, 12.5, 19.6, -6.8, -12.1,
  };
  
@@ -179191,7 +179588,7 @@ index d580c0aa4..e7c15067c 100644
  static struct CSSDoorsData2 data2 = {
      { 0x35, 0x39, 0x36, 0x38, 0x37 },
      0,
-@@ -314,47 +610,47 @@ static struct CSSDoorsData2 data2 = {
+@@ -314,47 +619,47 @@ static struct CSSDoorsData2 data2 = {
      },
  };
  
@@ -179266,7 +179663,7 @@ index d580c0aa4..e7c15067c 100644
  
      match_type = mnCharSel_804D6CB0->match_type;
  
-@@ -368,9 +664,9 @@ void mnCharSel_8025BD30(void)
+@@ -368,9 +673,9 @@ void mnCharSel_8025BD30(void)
      }
      if (lbLang_IsSavedLanguageJP()) {
          if (gmMainLib_GetGameRules()->mode == 1) {
@@ -179278,7 +179675,7 @@ index d580c0aa4..e7c15067c 100644
              HSD_SisLib_803A660C(0, 0x4A, 0x53);
          } else {
              HSD_SisLib_803A6530(0, 0x4A, 0x51);
-@@ -393,8 +689,7 @@ void mnCharSel_8025BD30(void)
+@@ -393,8 +698,7 @@ void mnCharSel_8025BD30(void)
          switch (gmMainLib_GetGameRules()->mode) {
          case Mode_Time:
              if (gmMainLib_GetGameRules()->time_limit != 0) {
@@ -179288,7 +179685,7 @@ index d580c0aa4..e7c15067c 100644
                  HSD_SisLib_803A660C(0, 0x4A, 0x53);
              } else {
                  HSD_SisLib_803A6530(0, 0x4A, 0x51);
-@@ -402,7 +697,7 @@ void mnCharSel_8025BD30(void)
+@@ -402,7 +706,7 @@ void mnCharSel_8025BD30(void)
              HSD_SisLib_803A660C(0, 0x4A, 0x4B);
              return;
          case Mode_Stock:
@@ -179297,7 +179694,7 @@ index d580c0aa4..e7c15067c 100644
              if (gmMainLib_GetGameRules()->stock_count < 2U) {
                  HSD_SisLib_803A660C(0, 0x4A, 0x55);
              } else {
-@@ -412,8 +707,7 @@ void mnCharSel_8025BD30(void)
+@@ -412,8 +716,7 @@ void mnCharSel_8025BD30(void)
              return;
          case Mode_Coin:
              if (gmMainLib_GetGameRules()->time_limit != 0) {
@@ -179307,7 +179704,7 @@ index d580c0aa4..e7c15067c 100644
                  HSD_SisLib_803A660C(0, 0x4A, 0x53);
              } else {
                  HSD_SisLib_803A6530(0, 0x4A, 0x51);
-@@ -422,8 +716,7 @@ void mnCharSel_8025BD30(void)
+@@ -422,8 +725,7 @@ void mnCharSel_8025BD30(void)
              return;
          case Mode_Bonus:
              if (gmMainLib_GetGameRules()->time_limit != 0) {
@@ -179317,7 +179714,7 @@ index d580c0aa4..e7c15067c 100644
                  HSD_SisLib_803A660C(0, 0x4A, 0x53);
              } else {
                  HSD_SisLib_803A6530(0, 0x4A, 0x51);
-@@ -874,12 +1167,12 @@ void mnCharSel_8025D1C4(int port, int mode)
+@@ -874,12 +1176,12 @@ void mnCharSel_8025D1C4(int port, int mode)
                  text->text_color.a = 0xA0;
              }
              {
@@ -179333,7 +179730,7 @@ index d580c0aa4..e7c15067c 100644
              HSD_JObjSetFlags(sp10 = HSD_JObjGetChild(sp10), JOBJ_HIDDEN);
              HSD_JObjSetFlags(sp10 = HSD_JObjGetNext(sp10), JOBJ_HIDDEN);
              HSD_JObjSetFlags(sp10 = HSD_JObjGetNext(HSD_JObjGetNext(sp10)),
-@@ -973,9 +1266,14 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
+@@ -973,9 +1275,14 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
      int i;
  
      if (mnCharSel_804D6CF5 == 1) {
@@ -179349,7 +179746,7 @@ index d580c0aa4..e7c15067c 100644
              sethidden(sp5C, hidden);
  
              sp58 =
-@@ -984,7 +1282,7 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
+@@ -984,7 +1291,7 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
              return;
          }
          sp54 =
@@ -179358,7 +179755,7 @@ index d580c0aa4..e7c15067c 100644
          sethidden(sp54, hidden);
  
          sp50 =
-@@ -995,7 +1293,12 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
+@@ -995,7 +1302,12 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
          }
          for (i = 0; i < 5; i++) {
              u8 tmp = data2.xf0[i];
@@ -179371,7 +179768,7 @@ index d580c0aa4..e7c15067c 100644
          }
          mnCharSel_8025C020(hidden);
          return;
-@@ -1006,6 +1309,11 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
+@@ -1006,6 +1318,11 @@ void mnCharSel_8025D5AC(int door, int frame, bool hidden)
                          TOBJ_MASK, (float) frame);
      sethidden(sp48, hidden);
  
@@ -179383,7 +179780,7 @@ index d580c0aa4..e7c15067c 100644
      sp44 = animateJoint(mnCharSel_804D6CC0,
                          mnCharSel_803F0DFC.doors[door].emblem_joint, TOBJ_MASK,
                          (float) frame);
-@@ -1028,7 +1336,7 @@ static inline bool isDuplicateCostumeWith(int door, CSSData* css,
+@@ -1028,7 +1345,7 @@ static inline bool isDuplicateCostumeWith(int door, CSSData* css,
      for (j = 0; j < num_doors; j++) {
          CSSDoor* other_door = &mnCharSel_803F0DFC.doors[j];
          if (door != j && other_door->p_kind != 3 &&
@@ -179392,7 +179789,7 @@ index d580c0aa4..e7c15067c 100644
              other_door->sel_icon == base_door->sel_icon &&
              base_door->costume == other_door->costume)
          {
-@@ -1071,7 +1379,7 @@ static inline bool isDuplicateCostumeCached(int door)
+@@ -1071,7 +1388,7 @@ static inline bool isDuplicateCostumeCached(int door)
      (void) cost;
      for (j = 0; j < num_doors; j++) {
          if (door != j && mnCharSel_803F0DFC.doors[j].p_kind != 3 &&
@@ -179401,7 +179798,7 @@ index d580c0aa4..e7c15067c 100644
              equalU8(mnCharSel_803F0DFC.doors[j].sel_icon, sel) &&
              cost == mnCharSel_803F0DFC.doors[j].costume)
          {
-@@ -1098,7 +1406,7 @@ static inline bool isDuplicateCostumeExact(int door)
+@@ -1098,7 +1415,7 @@ static inline bool isDuplicateCostumeExact(int door)
      for (j = 0; j < num_doors; j++) {
          CSSDoor* other_door = &mnCharSel_803F0DFC.doors[j];
          if (door != j && other_door->p_kind != 3 &&
@@ -179410,7 +179807,7 @@ index d580c0aa4..e7c15067c 100644
              other_door->sel_icon == base_door->sel_icon &&
              base_door->costume == other_door->costume)
          {
-@@ -1123,7 +1431,7 @@ static inline bool isDuplicateCostume(int door)
+@@ -1123,7 +1440,7 @@ static inline bool isDuplicateCostume(int door)
      for (j = 0; j < num_doors; j++) {
          CSSDoor* other_door = &mnCharSel_803F0DFC.doors[j];
          if (door != j && other_door->p_kind != 3 &&
@@ -179419,7 +179816,7 @@ index d580c0aa4..e7c15067c 100644
              other_door->sel_icon == base_door->sel_icon &&
              base_door->costume == other_door->costume)
          {
-@@ -1133,9 +1441,6 @@ static inline bool isDuplicateCostume(int door)
+@@ -1133,9 +1450,6 @@ static inline bool isDuplicateCostume(int door)
      return false;
  }
  
@@ -179429,7 +179826,7 @@ index d580c0aa4..e7c15067c 100644
  bool mnCharSel_8025DAA0(int door)
  {
      int num_doors;
-@@ -1149,7 +1454,7 @@ bool mnCharSel_8025DAA0(int door)
+@@ -1149,7 +1463,7 @@ bool mnCharSel_8025DAA0(int door)
  
      for (j = 0; j < num_doors; j++) {
          if (door != j && mnCharSel_803F0DFC.doors[j].p_kind != 3 &&
@@ -179438,7 +179835,7 @@ index d580c0aa4..e7c15067c 100644
              mnCharSel_803F0DFC.doors[j].sel_icon ==
                  mnCharSel_803F0DFC.doors[door].sel_icon &&
              mnCharSel_803F0DFC.doors[door].costume ==
-@@ -1160,9 +1465,6 @@ bool mnCharSel_8025DAA0(int door)
+@@ -1160,9 +1474,6 @@ bool mnCharSel_8025DAA0(int door)
      }
      return false;
  }
@@ -179448,7 +179845,7 @@ index d580c0aa4..e7c15067c 100644
  
  static inline void pickUniqueCostume(int door)
  {
-@@ -1207,9 +1509,9 @@ void mnCharSel_8025DB34(u8 arg0)
+@@ -1207,9 +1518,9 @@ void mnCharSel_8025DB34(u8 arg0)
      mnCharSel_8025D5AC((int) arg0, 0, 1);
  
      /* Name display */
@@ -179460,7 +179857,7 @@ index d580c0aa4..e7c15067c 100644
              HSD_SisLib_803A70A0(mnCharSel_803F0E8C[arg0].data->text, 0,
                                  (char*) mnCharSel_803F0A48.gnw_name);
          } else {
-@@ -1253,7 +1555,7 @@ void mnCharSel_8025DB34(u8 arg0)
+@@ -1253,7 +1564,7 @@ void mnCharSel_8025DB34(u8 arg0)
              animateJoint(mnCharSel_804D6CC0, 0x2B, MOBJ_MASK, anim_frame);
          }
          if (mnCharSel_803F0E8C[arg0].data->use_tag == 0 &&
@@ -179469,7 +179866,7 @@ index d580c0aa4..e7c15067c 100644
          {
              mnCharSel_803F0E8C[arg0].data->text->hidden = 1;
          } else {
-@@ -1516,7 +1818,7 @@ void mnCharSel_8025DB34(u8 arg0)
+@@ -1516,7 +1827,7 @@ void mnCharSel_8025DB34(u8 arg0)
          /* Hide/show nametag text */
          if (mnCharSel_803F0DFC.doors[arg0].p_kind == 3 ||
              (mnCharSel_803F0E8C[arg0].data->use_tag == 0 &&
@@ -179478,7 +179875,7 @@ index d580c0aa4..e7c15067c 100644
          {
              mnCharSel_803F0E8C[arg0].data->text->hidden = 1;
          } else {
-@@ -1527,7 +1829,7 @@ void mnCharSel_8025DB34(u8 arg0)
+@@ -1527,7 +1838,7 @@ void mnCharSel_8025DB34(u8 arg0)
      /* Final: costume color assignment */
      {
          u8 final_icon = mnCharSel_803F0DFC.doors[arg0].sel_icon;
@@ -179487,7 +179884,7 @@ index d580c0aa4..e7c15067c 100644
              if (mnCharSel_804D6CF5 == 1 ||
                  mnCharSel_804D6CB0->vs.start.rules.is_teams == 0)
              {
-@@ -1557,10 +1859,39 @@ void mnCharSel_8025DB34(u8 arg0)
+@@ -1557,10 +1868,39 @@ void mnCharSel_8025DB34(u8 arg0)
                  } else {
                      port = arg0;
                  }
@@ -179527,7 +179924,7 @@ index d580c0aa4..e7c15067c 100644
          }
      }
  }
-@@ -1588,6 +1919,9 @@ void mnCharSel_8025EE8C(u8 idx)
+@@ -1588,6 +1928,9 @@ void mnCharSel_8025EE8C(u8 idx)
          HSD_JObjAnimAll(sp14);
          HSD_ForeachAnim(sp14, JOBJ_TYPE, TOBJ_MASK, HSD_AObjStopAnim,
                          AOBJ_ARG_AOV, 0, 0);
@@ -179537,7 +179934,7 @@ index d580c0aa4..e7c15067c 100644
          mnCharSel_8025DB34(0);
          if (mnCharSel_804D6CB0->match_type == TRAINING_MODE) {
              mnCharSel_8025DB34(1);
-@@ -1684,21 +2018,21 @@ void fn_8025F0E0(HSD_GObj* gobj)
+@@ -1684,21 +2027,21 @@ void fn_8025F0E0(HSD_GObj* gobj)
                          AOBJ_ARG_AF, 0.0f);
      }
  
@@ -179562,7 +179959,7 @@ index d580c0aa4..e7c15067c 100644
                      HSD_ForeachAnim(sp48, JOBJ_TYPE, TOBJ_MASK,
                                      HSD_AObjReqAnim, AOBJ_ARG_AF, 0.0f);
                      HSD_JObjAnimAll(sp48);
-@@ -2022,6 +2356,73 @@ static inline s32 getPlayerForDoor(u8 door)
+@@ -2022,6 +2365,73 @@ static inline s32 getPlayerForDoor(u8 door)
      return door;
  }
  
@@ -179636,7 +180033,7 @@ index d580c0aa4..e7c15067c 100644
  void mnCharSel_8025FB50(u8 door, s32 arg1)
  {
      s32 icon_idx;
-@@ -2029,7 +2430,7 @@ void mnCharSel_8025FB50(u8 door, s32 arg1)
+@@ -2029,7 +2439,7 @@ void mnCharSel_8025FB50(u8 door, s32 arg1)
      HSD_JObj* icon_jobj;
  
      do {
@@ -179645,7 +180042,7 @@ index d580c0aa4..e7c15067c 100644
          icon_idx = temp;
          icon_offset = getIconOffset(icon_idx);
      } while (icons[icon_idx].state == 0);
-@@ -2061,11 +2462,11 @@ void mnCharSel_8025FB50(u8 door, s32 arg1)
+@@ -2061,11 +2471,11 @@ void mnCharSel_8025FB50(u8 door, s32 arg1)
                              mnCharSel_804A0BC0[mnCharSel_804D6CF5 - 1]->gobj);
  
      if (mnCharSel_804D6CF5 == 1) {
@@ -179661,7 +180058,7 @@ index d580c0aa4..e7c15067c 100644
      }
      HSD_ForeachAnim(icon_jobj, JOBJ_TYPE, TOBJ_MASK, HSD_AObjReqAnim,
                      AOBJ_ARG_AF, 10.0);
-@@ -2080,9 +2481,6 @@ void mnCharSel_8025FB50(u8 door, s32 arg1)
+@@ -2080,9 +2490,6 @@ void mnCharSel_8025FB50(u8 door, s32 arg1)
      }
  }
  
@@ -179671,7 +180068,7 @@ index d580c0aa4..e7c15067c 100644
  s32 mnCharSel_8025FDEC(u8 door)
  {
      CSSData* css;
-@@ -2104,7 +2502,20 @@ s32 mnCharSel_8025FDEC(u8 door)
+@@ -2104,7 +2511,20 @@ s32 mnCharSel_8025FDEC(u8 door)
      css = mnCharSel_804D6CB0;
      c_kind = css->vs.start.players[player].ckind;
  
@@ -179692,7 +180089,7 @@ index d580c0aa4..e7c15067c 100644
          if (c_kind != icons[mnCharSel_803F0DFC.doors[door].sel_icon].char_kind)
          {
              mnCharSel_803F0DFC.doors[door].costume = 0;
-@@ -2112,7 +2523,7 @@ s32 mnCharSel_8025FDEC(u8 door)
+@@ -2112,7 +2532,7 @@ s32 mnCharSel_8025FDEC(u8 door)
  
          {
              CSSIcon* icon = icons;
@@ -179701,7 +180098,7 @@ index d580c0aa4..e7c15067c 100644
                  if (css->vs.start.players[player].ckind ==
                      icon[icon_idx].char_kind)
                  {
-@@ -2134,30 +2545,18 @@ s32 mnCharSel_8025FDEC(u8 door)
+@@ -2134,30 +2554,18 @@ s32 mnCharSel_8025FDEC(u8 door)
          mnCharSel_804A0BD0[door]->x5 = 0;
  
          if (mnCharSel_804D6CF5 == 1) {
@@ -179737,7 +180134,7 @@ index d580c0aa4..e7c15067c 100644
  
          if (mnCharSel_804D6CF6 != 3 && mnCharSel_804D6CF6 != 4) {
              int sel = mnCharSel_803F0DFC.doors[door].sel_icon;
-@@ -2168,21 +2567,267 @@ s32 mnCharSel_8025FDEC(u8 door)
+@@ -2168,21 +2576,267 @@ s32 mnCharSel_8025FDEC(u8 door)
      }
      return 1;
  }
@@ -179973,8 +180370,9 @@ index d580c0aa4..e7c15067c 100644
 +#ifdef MU_NATIVE
 +    /* PreventColorChange: none in Teams, none while locked in (online CSS). */
 +    if (mu_slippi_css_block_costume_change()) {
-+        return;
-+    }
+         return;
+     }
+-    if (mnCharSel_803F0DFC.doors[door].sel_icon_prev >= 0x19) {
 +#endif
 +#if MU_SQUAD
 +    /* Based on Squad Strike by Chris (x9x9x9x9x9), https://github.com/x9x9x9x9x9/squad-strike v1.0.0, used with the author's permission (11-03-2026) */
@@ -179986,16 +180384,15 @@ index d580c0aa4..e7c15067c 100644
 +    if (mnCharSel_803F0DFC.doors[door].sel_icon_prev >= CSS_NONE) {
          return;
      }
--    if (mnCharSel_803F0DFC.doors[door].sel_icon_prev >= 0x19) {
-+
+ 
 +#ifdef MU_NATIVE
 +    /* 20XX Hack Pack "Disable X/Y Alt Costumes for Extra Characters" (802600D8): a hidden fighter
 +     * keeps its costume (the game has no costume count for it). Off: 0. */
 +    if (mu_hp_css_extra(icons[mnCharSel_803F0DFC.doors[door].sel_icon].char_kind)) {
-         return;
-     }
++        return;
++    }
 +#endif
- 
++
 +#ifdef MU_NATIVE
 +    /* L or R alone: the costume stays, its skin changes (not both at once, which is the start of
 +     * the L+R+A+START reset). */
@@ -180009,7 +180406,7 @@ index d580c0aa4..e7c15067c 100644
      if (input & HSD_PAD_X) {
          do {
              mnCharSel_803F0DFC.doors[door].costume =
-@@ -2270,6 +2915,12 @@ static inline void updateCursorDisplay(HSD_JObj* jobj,
+@@ -2270,6 +2924,12 @@ static inline void updateCursorDisplay(HSD_JObj* jobj,
              }
  
              lb_80011E24(jobj, color_jobj, 3, -1);
@@ -180022,7 +180419,7 @@ index d580c0aa4..e7c15067c 100644
              {
                  HSD_JObj* anim_jobj = *color_jobj;
                  HSD_ForeachAnim(anim_jobj, JOBJ_TYPE, TOBJ_MASK,
-@@ -2402,6 +3053,12 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2402,6 +3062,12 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
      }
  
      if (mnCharSel_804D6CF6 == 0) {
@@ -180035,7 +180432,7 @@ index d580c0aa4..e7c15067c 100644
          cursor->x8 = 0;
  
          if (mnCharSel_804D6CF5 == 1) {
-@@ -2430,9 +3087,20 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2430,9 +3096,20 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
              getStickDelta(port, &dx, &dy);
  
              if (HSD_PadCopyStatus[cursor->x4].err != 0) {
@@ -180056,7 +180453,7 @@ index d580c0aa4..e7c15067c 100644
                      cursor->xA = 0;
                      if (cursor->x5 == 1) {
                          door = cursor->x6;
-@@ -2448,7 +3116,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2448,7 +3125,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                          }
                      } else {
                          if (mnCharSel_803F0DFC.doors[cursor->x4].sel_icon >=
@@ -180065,7 +180462,7 @@ index d580c0aa4..e7c15067c 100644
                              mnCharSel_803F0DFC.doors[cursor->x4].p_kind != 3 &&
                              mnCharSel_8025FDEC(cursor->x4) != 0)
                          {
-@@ -2456,9 +3124,17 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2456,9 +3133,17 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                          }
                      }
                      if (mnCharSel_803F0DFC.doors[cursor->x4].p_kind == 0) {
@@ -180083,7 +180480,7 @@ index d580c0aa4..e7c15067c 100644
                          mnCharSel_804D6CB0->vs.start.players[cursor->x4]
                              .nametag = 0x78;
                          mnCharSel_803F0E8C[cursor->x4].data->use_tag = 0;
-@@ -2536,6 +3212,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2536,6 +3221,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                  if (-22.0f > cursor->x10) {
                      cursor->x10 = -22.0f;
                  }
@@ -180098,7 +180495,7 @@ index d580c0aa4..e7c15067c 100644
                  if (26.0f < cursor->xC) {
                      cursor->xC = 26.0f;
                  }
-@@ -2544,6 +3228,31 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2544,6 +3237,31 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                  }
              }
          }
@@ -180130,7 +180527,7 @@ index d580c0aa4..e7c15067c 100644
  
          {
              u8 port = cursor->x4;
-@@ -2551,6 +3260,11 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2551,6 +3269,11 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
              if (tag->state == 0) {
                  if (cursor->x5 == 1) {
                      door = cursor->x6;
@@ -180142,7 +180539,7 @@ index d580c0aa4..e7c15067c 100644
                      switch (door) {
                      case 0:
                      case 1:
-@@ -2565,7 +3279,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2565,7 +3288,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                  lbAudioAx_800237A8(0xB8, 0x7F, 0x40);
                              } else {
                                  mnCharSel_804A0BD0[door]->x5 = 0;
@@ -180151,7 +180548,7 @@ index d580c0aa4..e7c15067c 100644
                                  {
                                      s32 player_idx;
                                      if (mnCharSel_804D6CF5 == 1) {
-@@ -2586,7 +3300,15 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2586,7 +3309,15 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                              cursor->x5 = 2;
                          } else {
                              a_press = trigger & HSD_PAD_A;
@@ -180168,7 +180565,7 @@ index d580c0aa4..e7c15067c 100644
                                  struct CSSCharModel* m =
                                      mnCharSel_804A0BD0[door];
                                  if (m->xC < 6.0f && m->xC > -1.0f &&
-@@ -2594,14 +3316,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2594,14 +3325,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                       (m->x8 > 24.4f && m->x8 < 30.2f)))
                                  {
                                      s32 icon_count;
@@ -180185,7 +180582,7 @@ index d580c0aa4..e7c15067c 100644
                                          mnCharSel_8025FB50(door, 0);
                                          while (true) {
                                              mnCharSel_803F0DFC.doors[door]
-@@ -2617,6 +3339,10 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2617,6 +3348,10 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                                  break;
                                              }
                                          }
@@ -180196,7 +180593,7 @@ index d580c0aa4..e7c15067c 100644
                                          mnCharSel_8025DB34(door);
                                          cursor->x5 = 2;
                                          lbAudioAx_800237A8(0xB8, 0x7F, 0x40);
-@@ -2629,13 +3355,17 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2629,13 +3364,17 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                  struct CSSCharModel* m2 =
                                      mnCharSel_804A0BD0[door];
                                  s32 i;
@@ -180215,7 +180612,7 @@ index d580c0aa4..e7c15067c 100644
                                          mnCharSel_803F0DFC.doors[door]
                                              .sel_icon = (u8) i;
                                          mnCharSel_8025DB34(door);
-@@ -2652,6 +3382,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2652,6 +3391,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                              } else {
                                                  player_idx = door;
                                              }
@@ -180230,7 +180627,7 @@ index d580c0aa4..e7c15067c 100644
                                              mnCharSel_804D6CB0->vs.start
                                                  .players[player_idx]
                                                  .ckind =
-@@ -2661,12 +3399,12 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2661,12 +3408,12 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                                      .char_kind;
                                              if (mnCharSel_804D6CF5 == 1) {
                                                  lb_80011E24(
@@ -180247,7 +180644,7 @@ index d580c0aa4..e7c15067c 100644
                                              }
                                              HSD_ForeachAnim(sp98, JOBJ_TYPE,
                                                              TOBJ_MASK,
-@@ -2709,15 +3447,28 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2709,15 +3456,28 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                      }
                                  }
                                  mnCharSel_803F0DFC.doors[door].sel_icon_prev =
@@ -180279,7 +180676,7 @@ index d580c0aa4..e7c15067c 100644
                                          }
                                      } else {
                                          mnCharSel_CostumeChange((s32) door,
-@@ -2879,6 +3630,9 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2879,6 +3639,9 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                          cursor->x8 = 1;
                          if (trigger & HSD_PAD_A) {
                              s32 loop_i;
@@ -180289,7 +180686,7 @@ index d580c0aa4..e7c15067c 100644
                              mnCharSel_804D6CF6 = 3;
                              for (loop_i = 0; loop_i < (s32) mnCharSel_804D6CF5;
                                   loop_i++)
-@@ -2910,6 +3664,9 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2910,6 +3673,9 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                      case VS_SLOWMO:
                          cursor->x8 = 1;
                          if (trigger & HSD_PAD_A) {
@@ -180299,7 +180696,7 @@ index d580c0aa4..e7c15067c 100644
                              sfxMove();
                              {
                                  u8* is_teams = &mnCharSel_804D6CB0->vs.start
-@@ -2999,9 +3756,23 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -2999,9 +3765,23 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                          /* Retail nudges both toggle-box
                                           * bounds outward by 1/10485760. */
                                          if (cy4 < 0.20000009536743146 &&
@@ -180324,7 +180721,7 @@ index d580c0aa4..e7c15067c 100644
                                              {
                                                  u8 new_kind;
                                                  new_kind = mnCharSel_803F0DFC
-@@ -3019,9 +3790,19 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3019,9 +3799,19 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                                          .p_kind = 3;
                                                      break;
                                                  case 4:
@@ -180344,7 +180741,7 @@ index d580c0aa4..e7c15067c 100644
                                                      {
                                                          mnCharSel_803F0DFC
                                                              .doors[door]
-@@ -3042,11 +3823,18 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3042,11 +3832,18 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                              if (mnCharSel_803F0DFC.doors[door]
                                                      .p_kind == 1)
                                              {
@@ -180363,7 +180760,7 @@ index d580c0aa4..e7c15067c 100644
                                                  if (mnCharSel_803F0DFC
                                                              .doors[door]
                                                              .selected_since_load ==
-@@ -3186,6 +3974,10 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3186,6 +3983,10 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                          -1);
                                  }
                                  lb_8000B1CC(sp98, NULL, (&sp88));
@@ -180374,7 +180771,7 @@ index d580c0aa4..e7c15067c 100644
                                  {
                                      if (cursor->xC > (sp88.x - 4.7f) &&
                                          cursor->xC < (5.2f + sp88.x))
-@@ -3232,7 +4024,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3232,7 +4033,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                          mnCharSel_803F0DFC.doors[ci].p_kind;
                                      if (pk2 != 3 &&
                                          mnCharSel_803F0DFC.doors[ci].sel_icon <
@@ -180383,7 +180780,7 @@ index d580c0aa4..e7c15067c 100644
                                          (pk2 != 0 || (s32) cursor->x4 == ci))
                                      {
                                          struct CSSCharModel* mc =
-@@ -3252,7 +4044,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3252,7 +4053,14 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                  }
                              }
  
@@ -180399,7 +180796,7 @@ index d580c0aa4..e7c15067c 100644
                                  u8 cport4 = cursor->x4;
                                  s32 closest_door = (u8) closest;
                                  mnCharSel_804A0BD0[(u8) closest]->x5 =
-@@ -3273,12 +4072,17 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3273,12 +4081,17 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                             -2.0f);
                              }
                          }
@@ -180419,7 +180816,7 @@ index d580c0aa4..e7c15067c 100644
                          {
                              f32 cy8 = cursor->x10;
                              if (cy8 > 0.2f && cy8 < 22.0f) {
-@@ -3306,7 +4110,18 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3306,7 +4119,18 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                  mnCharSel_804D6CB0->match_type != 1)
                              {
                                  if (mnCharSel_803F0DFC.doors[cport6].p_kind ==
@@ -180439,7 +180836,7 @@ index d580c0aa4..e7c15067c 100644
                                  {
                                      mnCharSel_803F0DFC.doors[cport6].p_kind =
                                          0;
-@@ -3320,7 +4135,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
+@@ -3320,7 +4144,7 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                  {
                                      u8 cport7 = cursor->x4;
                                      if (mnCharSel_803F0DFC.doors[cport7]
@@ -180448,7 +180845,7 @@ index d580c0aa4..e7c15067c 100644
                                      {
                                          mnCharSel_804A0BD0[cport7]->x5 =
                                              (u8) (next_port = cport7 + 1);
-@@ -3408,7 +4223,7 @@ void fn_80262648(HSD_GObj* gobj)
+@@ -3408,7 +4232,7 @@ void fn_80262648(HSD_GObj* gobj)
          u8 door = model->x4;
  
          if ((p_kind = mnCharSel_803F0DFC.doors[door].p_kind) == 3 ||
@@ -180457,7 +180854,7 @@ index d580c0aa4..e7c15067c 100644
          {
              HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
              return;
-@@ -3435,6 +4250,12 @@ void fn_80262648(HSD_GObj* gobj)
+@@ -3435,6 +4259,12 @@ void fn_80262648(HSD_GObj* gobj)
                  mnCharSel_804D50E0[mnCharSel_803F0DFC.doors[door].team];
          }
      }
@@ -180470,7 +180867,7 @@ index d580c0aa4..e7c15067c 100644
  
      HSD_JObjClearFlagsAll(jobj, JOBJ_HIDDEN);
      model->x7 = (u8) (model->x7 + 1);
-@@ -3474,7 +4295,7 @@ void fn_80262648(HSD_GObj* gobj)
+@@ -3474,7 +4304,7 @@ void fn_80262648(HSD_GObj* gobj)
  
                  for (j = 0; j < (s32) n_doors; j++) {
                      if (j != (s32) model->x4 && (*bdp)->x5 == 0 &&
@@ -180479,7 +180876,7 @@ index d580c0aa4..e7c15067c 100644
                      {
                          f32 dx;
                          f32 dy;
-@@ -3624,6 +4445,7 @@ void fn_80262F44(HSD_GObj* gobj)
+@@ -3624,6 +4454,7 @@ void fn_80262F44(HSD_GObj* gobj)
  {
      HSD_JObj* jobj = GET_JOBJ(gobj);
      int i;
@@ -180487,7 +180884,7 @@ index d580c0aa4..e7c15067c 100644
      PAD_STACK(0x8);
  
      if (mnCharSel_804D6CB0->match_type == VS_CAMERA) {
-@@ -3640,7 +4462,7 @@ void fn_80262F44(HSD_GObj* gobj)
+@@ -3640,7 +4471,7 @@ void fn_80262F44(HSD_GObj* gobj)
  
      if (mnCharSel_804D6CF5 == 1) {
          if (mnCharSel_804A0BC0[0]->x5 == 1 ||
@@ -180496,7 +180893,7 @@ index d580c0aa4..e7c15067c 100644
          {
              mnCharSel_804D6CF7 = 0;
          } else {
-@@ -3648,18 +4470,23 @@ void fn_80262F44(HSD_GObj* gobj)
+@@ -3648,18 +4479,23 @@ void fn_80262F44(HSD_GObj* gobj)
          }
          HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
      } else {
@@ -180522,7 +180919,7 @@ index d580c0aa4..e7c15067c 100644
              if (mnCharSel_804D6CB0->vs.start.rules.is_teams == 1) {
                  for (i = 0; i < (s32) (mnCharSel_804D6CF5 - 1); i++) {
                      s32 j;
-@@ -3721,6 +4548,41 @@ void fn_80262F44(HSD_GObj* gobj)
+@@ -3721,6 +4557,41 @@ void fn_80262F44(HSD_GObj* gobj)
              }
          }
  
@@ -180564,7 +180961,7 @@ index d580c0aa4..e7c15067c 100644
          if (mnCharSel_804D6CF2 == 0 && (trigger & HSD_PAD_START)) {
              if (mnCharSel_804D6CF7 != 0) {
                  mnCharSel_804D6CF6 = 1;
-@@ -3750,12 +4612,23 @@ void fn_80262F44(HSD_GObj* gobj)
+@@ -3750,12 +4621,23 @@ void fn_80262F44(HSD_GObj* gobj)
              }
          }
      }
@@ -180589,7 +180986,7 @@ index d580c0aa4..e7c15067c 100644
          HSD_JObjReqAnimAll(jobj, 0.0F);
      }
      HSD_JObjAnimAll(jobj);
-@@ -3820,6 +4693,12 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -3820,6 +4702,12 @@ void fn_802633B0(HSD_GObj* gobj)
      } else {
          num_entries = num_entries - 7;
      }
@@ -180602,7 +180999,7 @@ index d580c0aa4..e7c15067c 100644
  
      if (mnCharSel_804D6CF5 == 1) {
          lb_80011E24(mnCharSel_804D6CC0, &list_jobj, mnCharSel_803F0EBC.xc4,
-@@ -3834,9 +4713,9 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -3834,9 +4722,9 @@ void fn_802633B0(HSD_GObj* gobj)
      switch ((s32) tag->state) {
      case 1:
          mnCharSel_8025D1C4((s32) tag->port, 1);
@@ -180614,7 +181011,7 @@ index d580c0aa4..e7c15067c 100644
              {
                  HSD_SisLib_803A70A0(tag->name_ls, 0,
                                      (char*) mnCharSel_803F0A48.gnw_name);
-@@ -3939,13 +4818,25 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -3939,13 +4827,25 @@ void fn_802633B0(HSD_GObj* gobj)
          }
  
          HSD_SisLib_803A746C(tag->name_ls, 0, 0.0f, tag->x8);
@@ -180640,7 +181037,7 @@ index d580c0aa4..e7c15067c 100644
              for (j = 0; j < 9; j++) {
                  row_idx = j - page_off;
                  if (row_idx < 0) {
-@@ -3977,6 +4868,10 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -3977,6 +4877,10 @@ void fn_802633B0(HSD_GObj* gobj)
          }
  
          if (trigger & HSD_PAD_A) {
@@ -180651,7 +181048,7 @@ index d580c0aa4..e7c15067c 100644
              if (mnCharSel_804D6CF5 == 1) {
                  lb_80011E24(mnCharSel_804D6CC0, &list_origin_jobj,
                              mnCharSel_803F0EBC.name_list_joint, -1);
-@@ -3992,7 +4887,7 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -3992,7 +4896,7 @@ void fn_802633B0(HSD_GObj* gobj)
  
              if ((s32) cursor_row == 0) {
                  if (lbLang_IsSavedLanguageUS() != 0 &&
@@ -180660,7 +181057,7 @@ index d580c0aa4..e7c15067c 100644
                  {
                      HSD_SisLib_803A70A0(tag->text, 0,
                                          (char*) mnCharSel_803F0A48.gnw_name);
-@@ -4004,7 +4899,7 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -4004,7 +4908,7 @@ void fn_802633B0(HSD_GObj* gobj)
                                  .char_kind));
                  }
                  tag->text->default_kerning = 1;
@@ -180669,7 +181066,7 @@ index d580c0aa4..e7c15067c 100644
                      tag->text->hidden = 0;
                  } else {
                      tag->text->hidden = 1;
-@@ -4039,7 +4934,14 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -4039,7 +4943,14 @@ void fn_802633B0(HSD_GObj* gobj)
                  goto check_cancel;
              }
  
@@ -180684,7 +181081,7 @@ index d580c0aa4..e7c15067c 100644
                  if (IsNameListFull() == 0) {
                      if (mnCharSel_804D6CF5 == 1) {
                          mnCharSel_804D6CF9 = mnCharSel_804D6CF0;
-@@ -4063,7 +4965,12 @@ void fn_802633B0(HSD_GObj* gobj)
+@@ -4063,7 +4974,12 @@ void fn_802633B0(HSD_GObj* gobj)
                  goto check_cancel;
              }
  
@@ -180697,7 +181094,7 @@ index d580c0aa4..e7c15067c 100644
                  {
                      s32 p;
                      for (p = 0; p < (s32) mnCharSel_804D6CF5; p++) {
-@@ -4178,6 +5085,40 @@ void fn_8026407C(HSD_GObj* gobj)
+@@ -4178,6 +5094,40 @@ void fn_8026407C(HSD_GObj* gobj)
      HSD_FogSet(GET_FOG(gobj));
  }
  
@@ -180738,7 +181135,7 @@ index d580c0aa4..e7c15067c 100644
  static const GXColor mnCharSel_804DC580 = { 255, 255, 0, 255 };
  static const GXColor mnCharSel_804DC584 = { 20, 80, 160, 255 };
  static const GXColor mnCharSel_804DC588 = { 60, 140, 80, 255 };
-@@ -4185,6 +5126,156 @@ static const GXColor mnCharSel_804DC58C = { 160, 160, 0, 255 };
+@@ -4185,6 +5135,195 @@ static const GXColor mnCharSel_804DC58C = { 160, 160, 0, 255 };
  static const GXColor mnCharSel_804DC590 = { 180, 80, 0, 255 };
  static const GXColor mnCharSel_804DC594 = { 220, 0, 0, 255 };
  
@@ -180888,6 +181285,45 @@ index d580c0aa4..e7c15067c 100644
 +        if (names[i] == NULL && fighter <= ChKind_Popo) names[i] = lbl_803D4FDC[fighter];
 +    }
 +    mu_css_state_log(gm_GetCurrentGameMode(), gm_GetCurrentSceneIndex(), doors, names);
++    {
++        unsigned int unlocked_mask = 0;
++        int is_mex = (mu_mex_active() || icons != icons_retail) ? 1 : 0;
++        for (i = 0; i < 26; ++i) {
++            if (icons[i].state != 0) unlocked_mask |= (1u << i);
++        }
++        mu_rui_sync_css_bounds(icons, 26, is_mex);
++        {
++            const int is_online = mu_slippi_css_online() ? 1 : 0;
++            const int online_mode = is_online ? (int) mu_slippi_state()->mode : 0;
++            const int is_teams = mnCharSel_804D6CB0 != NULL && mnCharSel_804D6CB0->vs.start.rules.is_teams ? 1 : 0;
++            const int match_type = mnCharSel_804D6CB0 != NULL ? (int) mnCharSel_804D6CB0->match_type : 0;
++            const int mode = mnCharSel_804D6CB0 != NULL ? (int) mnCharSel_804D6CB0->vs.start.rules.match_kind : 1;
++            const int stocks = (int) data2.stocks;
++            const int time_min = mnCharSel_804D6CB0 != NULL ? (int) (mnCharSel_804D6CB0->vs.start.rules.time_limit / 60) : 8;
++            mu_rui_note_css_header(mnCharSel_804D6CF7 != 0, (int) mnCharSel_804D6CF7,
++                                   is_teams, match_type, mode, stocks, time_min,
++                                   (int) mnCharSel_804D6CF5, is_mex, is_online, online_mode,
++                                   unlocked_mask);
++        }
++        for (i = 0; i < 4; ++i) {
++            CSSDoor* door = &mnCharSel_803F0DFC.doors[i];
++            int fighter = door->sel_icon < CSS_NONE ? icons[door->sel_icon].char_kind : -1;
++            int locked = i < coin_count && mnCharSel_804A0BD0[i] != NULL && mnCharSel_804A0BD0[i]->x5 == 0;
++            int holding = i < coin_count && mnCharSel_804A0BD0[i] != NULL && mnCharSel_804A0BD0[i]->x5 != 0;
++            float hx = (i < 4 && mnCharSel_804A0BC0[i] != NULL) ? mnCharSel_804A0BC0[i]->xC : 0.0f;
++            float hy = (i < 4 && mnCharSel_804A0BC0[i] != NULL) ? mnCharSel_804A0BC0[i]->x10 : 0.0f;
++            float px = (i < 4 && mnCharSel_804A0BD0[i] != NULL) ? mnCharSel_804A0BD0[i]->x8 : hx;
++            float py = (i < 4 && mnCharSel_804A0BD0[i] != NULL) ? mnCharSel_804A0BD0[i]->xC : hy;
++            int cpu_lvl = mnCharSel_804D6CB0 != NULL ? (int) mnCharSel_804D6CB0->vs.start.players[i].cpu_level : 1;
++            const char* tag = NULL;
++            if (mnCharSel_804D6CB0 != NULL) {
++                u8 tag_idx = mnCharSel_804D6CB0->vs.start.players[i].nametag;
++                if (tag_idx < 0x78) tag = GetNameText(tag_idx);
++            }
++            mu_rui_note_css_port(i, door->p_kind, door->sel_icon, fighter, door->costume,
++                                 door->team, cpu_lvl, locked, holding, hx, hy, px, py, tag);
++        }
++    }
 +    mu_friends4_css_frame();
 +}
 +#endif
@@ -180895,7 +181331,7 @@ index d580c0aa4..e7c15067c 100644
  s32 mnCharSel_802640A0(void)
  {
      HSD_JObj* sp108;
-@@ -4220,9 +5311,18 @@ s32 mnCharSel_802640A0(void)
+@@ -4220,9 +5359,18 @@ s32 mnCharSel_802640A0(void)
      u8 match_type = mnCharSel_804D6CB0->match_type;
  
      if (match_type != 0) {
@@ -180914,7 +181350,7 @@ index d580c0aa4..e7c15067c 100644
          switch (gmMainLib_GetGameRules()->mode) {
          case 0:
              lbAudioAx_800237A8(0x7535, 0x7F, 0x40);
-@@ -4239,11 +5339,20 @@ s32 mnCharSel_802640A0(void)
+@@ -4239,11 +5387,20 @@ s32 mnCharSel_802640A0(void)
          }
      }
  
@@ -180935,7 +181371,7 @@ index d580c0aa4..e7c15067c 100644
      mnCharSel_804D6CF3 = 0;
      {
          u8* mt_p = &mnCharSel_804D6CB0->match_type;
-@@ -4272,25 +5381,34 @@ s32 mnCharSel_802640A0(void)
+@@ -4272,25 +5429,34 @@ s32 mnCharSel_802640A0(void)
      if ((u8) mnCharSel_804D6CF4 != 0) {
          mnCharSel_804D6CF4 = 0;
          for (i = 0; i < num_players; i++) {
@@ -180974,7 +181410,7 @@ index d580c0aa4..e7c15067c 100644
          HSD_LObjSetNext(lobj0, lobj1);
          HSD_GObjObject_80390A70(gobj, HSD_GObj_LightKind, lobj0);
      }
-@@ -4298,35 +5416,57 @@ s32 mnCharSel_802640A0(void)
+@@ -4298,35 +5464,57 @@ s32 mnCharSel_802640A0(void)
  
      gobj = GObj_Create(0xE, 2, 0);
      {
@@ -181045,7 +181481,7 @@ index d580c0aa4..e7c15067c 100644
      {
          u8 obj_kind = HSD_GObj_JObjKind;
          HSD_GObjObject_80390A70(mnCharSel_804D6CBC, obj_kind,
-@@ -4339,7 +5479,17 @@ s32 mnCharSel_802640A0(void)
+@@ -4339,7 +5527,17 @@ s32 mnCharSel_802640A0(void)
      HSD_ForeachAnim(mnCharSel_804D6CC0, JOBJ_TYPE, ALL_TYPE_MASK,
                      HSD_AObjStopAnim, AOBJ_ARG_AOV, 0, 0);
  
@@ -181063,7 +181499,7 @@ index d580c0aa4..e7c15067c 100644
          row_a = 2;
          row_b = 0x13;
      } else {
-@@ -4363,8 +5513,12 @@ s32 mnCharSel_802640A0(void)
+@@ -4363,8 +5561,12 @@ s32 mnCharSel_802640A0(void)
      icons[row_b].bound_u = ICONROWHT_TOP_TOP;
      icons[row_b].bound_d = ICONROWHT_MID_TOP;
  
@@ -181077,7 +181513,7 @@ index d580c0aa4..e7c15067c 100644
          icons[icon].anim_timer = 0;
          if (mnCharSel_804D6CF5 == 1) {
              lb_80011E24(mnCharSel_804D6CC0, &sp108, icons[icon].joint_id_1p,
-@@ -4404,21 +5558,24 @@ s32 mnCharSel_802640A0(void)
+@@ -4404,21 +5606,24 @@ s32 mnCharSel_802640A0(void)
              break;
          }
      }
@@ -181106,7 +181542,7 @@ index d580c0aa4..e7c15067c 100644
              HSD_JObjReqAnimAll(mnCharSel_804D6CC8, 0.0f);
              HSD_ForeachAnim(mnCharSel_804D6CC8, JOBJ_TYPE, ALL_TYPE_MASK,
                              HSD_AObjStopAnim, AOBJ_ARG_AOV, 0, 0);
-@@ -4428,22 +5585,31 @@ s32 mnCharSel_802640A0(void)
+@@ -4428,22 +5633,31 @@ s32 mnCharSel_802640A0(void)
      if (mnCharSel_804D6CB0->match_type == 0x17) {
          u8 ck;
          gobj = GObj_Create(4, 5, 0x80);
@@ -181143,7 +181579,7 @@ index d580c0aa4..e7c15067c 100644
              } while (icons[i].state == 0);
              char_kinds = &icons[0].char_kind;
              icon_off = getIconOffset(i);
-@@ -4457,14 +5623,14 @@ s32 mnCharSel_802640A0(void)
+@@ -4457,14 +5671,14 @@ s32 mnCharSel_802640A0(void)
  
      if (mnCharSel_804D6CB0->match_type == 1) {
          gobj = GObj_Create(4, 5, 0x80);
@@ -181162,7 +181598,7 @@ index d580c0aa4..e7c15067c 100644
          HSD_JObjReqAnimAll(mnCharSel_804D6CCC, 0.0f);
      }
  
-@@ -4472,15 +5638,15 @@ s32 mnCharSel_802640A0(void)
+@@ -4472,15 +5686,15 @@ s32 mnCharSel_802640A0(void)
          HSD_GObj* cursor_gobj;
          struct CSSCursorData* cursor;
          cursor_gobj = GObj_Create(4, 5, 0x80);
@@ -181182,7 +181618,7 @@ index d580c0aa4..e7c15067c 100644
          HSD_JObjReqAnimAll(jobj, 0.0f);
          HSD_JObjAnimAll(jobj);
          HSD_ForeachAnim(jobj, JOBJ_TYPE, ALL_TYPE_MASK, HSD_AObjStopAnim,
-@@ -4494,13 +5660,18 @@ s32 mnCharSel_802640A0(void)
+@@ -4494,13 +5708,18 @@ s32 mnCharSel_802640A0(void)
          cursor->x6 = 0;
          cursor->x5 = 2;
          cursor->xC = (f32) ((15.0f * (f32) i) - 31.0f);
@@ -181202,7 +181638,7 @@ index d580c0aa4..e7c15067c 100644
              {
                  int player;
                  struct CSSCharModel* model = HSD_MemAlloc(sizeof(*model));
-@@ -4508,9 +5679,9 @@ s32 mnCharSel_802640A0(void)
+@@ -4508,9 +5727,9 @@ s32 mnCharSel_802640A0(void)
                  GObj_InitUserData(model_gobj, 4, HSD_Free, model);
                  GObj_SetupGXLink(model_gobj, HSD_GObj_JObjCallback, 2, 0x80);
                  HSD_GObj_SetupProc(model_gobj, fn_80262648, 2);
@@ -181215,7 +181651,7 @@ index d580c0aa4..e7c15067c 100644
                  HSD_JObjReqAnimAll(jobj, 0.0f);
                  {
                      HSD_JObj* anim_jobj = jobj;
-@@ -4532,17 +5703,34 @@ s32 mnCharSel_802640A0(void)
+@@ -4532,17 +5751,34 @@ s32 mnCharSel_802640A0(void)
                  } else {
                      player = i;
                  }
@@ -181252,7 +181688,7 @@ index d580c0aa4..e7c15067c 100644
                      u8* slot_type;
                      mnCharSel_804D6CB0->vs.start.players[player].ckind =
                          CKind_Playable_Count;
-@@ -4650,6 +5838,12 @@ s32 mnCharSel_802640A0(void)
+@@ -4650,6 +5886,12 @@ s32 mnCharSel_802640A0(void)
              HSD_SisLib_803A6B98(td->text, 80.0f, 0.0f,
                                  "\x81\x45\x81\x45\x81\x45\x81\x45");
          }
@@ -181265,7 +181701,7 @@ index d580c0aa4..e7c15067c 100644
          if (mnCharSel_804D6CF5 == 1) {
              lb_80011E24(mnCharSel_804D6CC0, &sp108,
                          mnCharSel_803F0EBC.name_list_joint, -1);
-@@ -4661,6 +5855,10 @@ s32 mnCharSel_802640A0(void)
+@@ -4661,6 +5903,10 @@ s32 mnCharSel_802640A0(void)
              }
          }
          lb_8000B1CC(sp108, NULL, &spEC);
@@ -181276,7 +181712,7 @@ index d580c0aa4..e7c15067c 100644
          td->name_ls = HSD_SisLib_803A6754(0, ctx);
          td->name_ls->default_fitting = 1;
          text = td->name_ls;
-@@ -4697,6 +5895,9 @@ s32 mnCharSel_802640A0(void)
+@@ -4697,6 +5943,9 @@ s32 mnCharSel_802640A0(void)
              HSD_SisLib_803A6B98(td->name_ls, 10.0f, 0.0f,
                                  "\x81\x45\x81\x45\x81\x45\x81\x45");
          }
@@ -181286,7 +181722,7 @@ index d580c0aa4..e7c15067c 100644
          for (found = 0; found < 0x78; found++) {
              if (GetNameText((u8) found) == NULL) {
                  break;
-@@ -4745,10 +5946,14 @@ s32 mnCharSel_802640A0(void)
+@@ -4745,10 +5994,14 @@ s32 mnCharSel_802640A0(void)
                  mnCharSel_804D6CF8 - 1;
              mnCharSel_804D6CF8 = td->next_tag;
          }
@@ -181301,7 +181737,7 @@ index d580c0aa4..e7c15067c 100644
              td->use_tag = 1;
              HSD_SisLib_803A70A0(
                  td->text, 0,
-@@ -5156,6 +6361,33 @@ s32 mnCharSel_802640A0(void)
+@@ -5156,6 +6409,33 @@ s32 mnCharSel_802640A0(void)
          u8 mt;
          s32 clear;
          mnCharSel_803F0EBC.scroll_flag = 0;
@@ -181335,7 +181771,7 @@ index d580c0aa4..e7c15067c 100644
          text =
              HSD_SisLib_803A5ACC(0, ctx, -12.0f, -23.3f, 0.0f, 450.0f, 32.0f);
          text->default_alignment = 1;
-@@ -5164,6 +6396,10 @@ s32 mnCharSel_802640A0(void)
+@@ -5164,6 +6444,10 @@ s32 mnCharSel_802640A0(void)
          text->font_size.x = 0.07f;
          text->font_size.y = 0.07f;
          HSD_SisLib_803A6368(text, 0x4A);
@@ -181346,7 +181782,7 @@ index d580c0aa4..e7c15067c 100644
          mnCharSel_8025BD30();
          mt = mnCharSel_804D6CB0->match_type;
          if ((s32) mt < 3) {
-@@ -5190,6 +6426,26 @@ s32 mnCharSel_802640A0(void)
+@@ -5190,6 +6474,26 @@ s32 mnCharSel_802640A0(void)
                  text->font_size.x = 0.07f;
                  text->font_size.y = 0.07f;
                  mnCharSel_8025D1C4(i, 0);
@@ -181373,7 +181809,7 @@ index d580c0aa4..e7c15067c 100644
              }
          } else {
              for (i = 0; i < (s32) mnCharSel_804D6CF5; i++) {
-@@ -5203,13 +6459,13 @@ s32 mnCharSel_802640A0(void)
+@@ -5203,13 +6507,13 @@ s32 mnCharSel_802640A0(void)
      (void) ((u8*) text)[num_players];
      (void) icons[num_players];
      gobj = GObj_Create(4, 5, 0x80);
@@ -181391,7 +181827,7 @@ index d580c0aa4..e7c15067c 100644
      HSD_JObjReqAnimAll(jobj, 0.0f);
      HSD_ForeachAnim(jobj, JOBJ_TYPE, ALL_TYPE_MASK, HSD_AObjStopAnim,
                      AOBJ_ARG_AOV, 0, 0);
-@@ -5296,6 +6552,12 @@ s32 mnCharSel_802640A0(void)
+@@ -5296,6 +6600,12 @@ s32 mnCharSel_802640A0(void)
          }
      }
  
@@ -181404,7 +181840,7 @@ index d580c0aa4..e7c15067c 100644
      mnCharSel_8025EE8C(mnCharSel_804D6CB0->match_type);
      PAD_STACK(0x20);
      return lbAudioAx_80023F28(gmMainLib_8015ECB0());
-@@ -5305,9 +6567,22 @@ void mnCharSel_Scene_OnEnter(void* arg0)
+@@ -5305,9 +6615,22 @@ void mnCharSel_Scene_OnEnter(void* arg0)
  {
      PAD_STACK(8);
  
@@ -181427,7 +181863,7 @@ index d580c0aa4..e7c15067c 100644
  
      mnCharSel_804D6CF0 = mnCharSel_804D6CB0->unk_0x0 - 1;
  
-@@ -5341,6 +6616,24 @@ void mnCharSel_Scene_OnEnter(void* arg0)
+@@ -5341,6 +6664,24 @@ void mnCharSel_Scene_OnEnter(void* arg0)
      css_data_table = HSD_ArchiveGetPublicAddress(mnCharSel_804D6CD0,
                                                   "MnSelectChrDataTable");
      css_models = &css_data_table->models;
@@ -181452,7 +181888,7 @@ index d580c0aa4..e7c15067c 100644
      if (lbLang_IsSavedLanguageJP() != 0) {
          HSD_SisLib_803A62A0(0, "SdSlChr.dat", "SIS_SelCharData");
      } else {
-@@ -5348,10 +6641,26 @@ void mnCharSel_Scene_OnEnter(void* arg0)
+@@ -5348,10 +6689,26 @@ void mnCharSel_Scene_OnEnter(void* arg0)
      }
      mnCharSel_804D6CF4 = 0;
      mnCharSel_802640A0();
@@ -181479,7 +181915,7 @@ index d580c0aa4..e7c15067c 100644
      int num_slots;
      u8 slot_type;
      struct GameCache* cache;
-@@ -5359,6 +6668,20 @@ void mnCharSel_Scene_OnFrame(void)
+@@ -5359,6 +6716,20 @@ void mnCharSel_Scene_OnFrame(void)
  
      PAD_STACK(8);
  
@@ -181500,7 +181936,7 @@ index d580c0aa4..e7c15067c 100644
      mnCharSel_804D6CEC += 1;
      if (mnCharSel_804D6CF6 <= 1) {
          cache = &lbDvd_GetPreloadCacheScene()->game_cache;
-@@ -5415,9 +6738,45 @@ void mnCharSel_Scene_OnFrame(void)
+@@ -5415,9 +6786,45 @@ void mnCharSel_Scene_OnFrame(void)
                  }
              }
          }
@@ -181547,7 +181983,7 @@ index d580c0aa4..e7c15067c 100644
          sfxBack();
          lb_800145F4();
          mn_8022F138(1, 8);
-@@ -5444,6 +6803,22 @@ void mnCharSel_Scene_OnFrame(void)
+@@ -5444,6 +6851,22 @@ void mnCharSel_Scene_OnFrame(void)
              if (mnCharSel_804D6CF5 == 4) {
                  lbAudioAx_8002411C(0x147);
              }
@@ -181570,7 +182006,7 @@ index d580c0aa4..e7c15067c 100644
              sfxForward();
          }
          break;
-@@ -5466,16 +6841,41 @@ void mnCharSel_Scene_OnFrame(void)
+@@ -5466,16 +6889,41 @@ void mnCharSel_Scene_OnFrame(void)
          sfxForward();
          break;
      }
@@ -181612,7 +182048,7 @@ index d580c0aa4..e7c15067c 100644
      if (mnCharSel_804D6CD0 != NULL) {
          lbArchive_80016EFC(mnCharSel_804D6CD0);
          mnCharSel_804D6CD0 = NULL;
-@@ -5526,3 +6926,35 @@ void mnCharSel_Scene_OnExit(void* unused)
+@@ -5526,3 +6974,35 @@ void mnCharSel_Scene_OnExit(void* unused)
      lbAudioAx_8002702C(4, tmp);
      lbAudioAx_80027168();
  }
@@ -185984,7 +186420,7 @@ index a9841632c..9f22ab616 100644
      gobjproc =
          HSD_GObj_SetupProc(GObj_Create(0, 1, 0x80), mnLanguage_8024BFE0, 0);
 diff --git a/src/melee/mn/mnmain.c b/src/melee/mn/mnmain.c
-index dc6746eee..b53251c6f 100644
+index dc6746eee..a0881e941 100644
 --- a/src/melee/mn/mnmain.c
 +++ b/src/melee/mn/mnmain.c
 @@ -1,4 +1,7 @@
@@ -186447,7 +186883,7 @@ index dc6746eee..b53251c6f 100644
  {
      HSD_FogSet(gobj->hsd_obj);
  }
-@@ -1628,7 +1831,7 @@ void mn_8022BD8C(void)
+@@ -1628,13 +1831,16 @@ void mn_8022BD8C(void)
      mn_804D6BB0->gxlink_prios = 0x80;
  }
  
@@ -186456,7 +186892,41 @@ index dc6746eee..b53251c6f 100644
  {
      HSD_Fog* fog = GET_FOG(mn_804D6BA8);
      if (HSD_CObjSetCurrent(GET_COBJ(gobj)) != 0) {
-@@ -1685,6 +1888,9 @@ void mn_8022BEDC(HSD_GObj* gobj)
+         HSD_SetEraseColor(fog->color.r, fog->color.g, fog->color.b,
+                           fog->color.a);
+         HSD_CObjEraseScreen(GET_COBJ(gobj), 1, 0, 1);
++#ifdef MU_NATIVE
++        if (!mu_rui_menus_active())
++#endif
+         HSD_GObj_80390ED0(gobj, 7);
+         HSD_CObjEndCurrent();
+     }
+@@ -1671,6 +1877,16 @@ static inline HSD_GObj* mn_8022BE34_OnEnter(Vec3* pos)
+     return gobj;
+ }
+ 
++#ifdef MU_NATIVE
++static void mu_rui_menu_text_cam(HSD_GObj* gobj, intptr_t pass)
++{
++    if (mu_rui_menus_active()) {
++        return;
++    }
++    HSD_GObj_803910D8(gobj, pass);
++}
++#endif
++
+ void mn_8022BEDC(HSD_GObj* gobj)
+ {
+     HSD_GObj* temp_r3;
+@@ -1681,10 +1897,17 @@ void mn_8022BEDC(HSD_GObj* gobj)
+     mn_804D6BB0 = temp_r3;
+     cobj = HSD_CObjLoadDesc(MenMain_cam);
+     HSD_GObjObject_80390A70(temp_r3, HSD_GObj_CameraKind, cobj);
++#ifdef MU_NATIVE
++    GObj_SetupGXLinkMax(temp_r3, mu_rui_menu_text_cam, 0);
++#else
+     GObj_SetupGXLinkMax(temp_r3, HSD_GObj_803910D8, 0);
++#endif
      temp_r3->gxlink_prios = 0x80;
      HSD_GObj_SetupProc(temp_r3, mn_8022BA1C, 0);
      mn_804D6BB4 = HSD_SisLib_803A611C(0, temp_r3, 7, 8, 0x80, 7, 0x80, 0);
@@ -186466,7 +186936,7 @@ index dc6746eee..b53251c6f 100644
  }
  
  GXColor* mn_8022BFBC(int arg0)
-@@ -1727,6 +1933,9 @@ int mn_8022C010(int menu_kind, int selection)
+@@ -1727,6 +1950,9 @@ int mn_8022C010(int menu_kind, int selection)
      case MENU_KIND_RULES_ITEMS:
      case MENU_KIND_RULES_STAGE:
      case MENU_KIND_NAME_ENTRY:
@@ -186476,7 +186946,7 @@ index dc6746eee..b53251c6f 100644
          return 1;
      case MENU_KIND_TOY:
          return 2;
-@@ -1996,6 +2205,57 @@ void mn_8022C4F4(HSD_GObj* gp)
+@@ -1996,6 +2222,57 @@ void mn_8022C4F4(HSD_GObj* gp)
  
  MenuFlow mn_804A04F0;
  
@@ -186534,7 +187004,7 @@ index dc6746eee..b53251c6f 100644
  static inline u8 mn_8022C7CC_inline(void)
  {
      int i;
-@@ -2164,7 +2424,11 @@ void mn_8022CC28(HSD_GObj* gp)
+@@ -2164,7 +2441,11 @@ void mn_8022CC28(HSD_GObj* gp)
          case SEL_REG_ALLSTAR:
              sfxForward();
              data = gm_GetCurrentSceneExitData();
@@ -186546,7 +187016,7 @@ index dc6746eee..b53251c6f 100644
              gm_801A4B60();
              return;
          }
-@@ -2482,9 +2746,36 @@ void mn_8022D594(HSD_GObj* gp)
+@@ -2482,9 +2763,36 @@ void mn_8022D594(HSD_GObj* gp)
              gm_801A4B60();
              break;
          case SEL_VS_TOURNAMENT:
@@ -186583,7 +187053,7 @@ index dc6746eee..b53251c6f 100644
              gm_801A4B60();
              break;
          case SEL_VS_SPECIAL:
-@@ -2596,9 +2887,20 @@ void mn_8022D7F4(HSD_GObj* gp)
+@@ -2596,9 +2904,20 @@ void mn_8022D7F4(HSD_GObj* gp)
              break;
          case SEL_1P_EVENT:
              sfxForward();
@@ -186605,7 +187075,25 @@ index dc6746eee..b53251c6f 100644
          case SEL_1P_TRAINING:
              sfxForward();
              data = gm_GetCurrentSceneExitData();
-@@ -2727,7 +3029,7 @@ void mnMain_Scene_OnFrame(void)
+@@ -2722,12 +3041,25 @@ void mn_8022DB10(HSD_GObj* gp)
+ void mnMain_Scene_OnFrame(void)
+ {
+     MenuExitData* data;
++#ifdef MU_NATIVE
++    {
++        int kind = (int) mn_804A04F0.cur_menu;
++        int count = (kind >= 0 && kind < 0x22) ? (int) (mn_803EB6B0[kind].selection_count & 0xFF) : 0;
++        unsigned int mask = 0;
++        int i;
++        for (i = 0; i < count && i < 32; ++i) {
++            if (mn_80229938((MenuKind) kind, i)) mask |= (1u << i);
++        }
++        mu_rui_note_menu(kind, (int) mn_804A04F0.prev_menu, (int) mn_804A04F0.hovered_selection,
++                         count, (int) mn_804A04F0.entering_menu, mask, 0, 0);
++    }
++#endif
+     if (mn_8022F218() && mn_804A04F0.cur_menu != MENU_KIND_MAIN) {
+         lbAudioAx_80023694();
          sfxBack();
          mn_8022F268();
          gm_801603B0();
@@ -186614,7 +187102,7 @@ index dc6746eee..b53251c6f 100644
          lbMthp_8001F800();
          mn_8022EBDC();
          HSD_SisLib_803A5E70();
-@@ -2776,6 +3078,9 @@ void mnMain_Scene_OnEnter(void* user_data)
+@@ -2776,6 +3108,9 @@ void mnMain_Scene_OnEnter(void* user_data)
      *hovered_selection = data->hovered_selection;
      mn_804D6BAC = NULL;
      mn_804D6BB0 = NULL;
@@ -186624,7 +187112,7 @@ index dc6746eee..b53251c6f 100644
      if (data->load_assets != false) {
          mn_804D6BB8 = lbArchive_LoadSymbols(
              "MnMaAll", &MenMainBack_Top.joint, "MenMainBack_Top_joint",
-@@ -2924,7 +3229,19 @@ void mnMain_Scene_OnEnter(void* user_data)
+@@ -2924,7 +3259,19 @@ void mnMain_Scene_OnEnter(void* user_data)
              &MenMainCursorSs_Top.shapeanim_joint,
              "MenMainCursorSs_Top_shapeanim_joint",
  
@@ -186645,7 +187133,7 @@ index dc6746eee..b53251c6f 100644
  
          if (lbLang_IsSavedLanguageUS()) {
              HSD_SisLib_803A62A0(0, "SdMenu.usd", "SIS_MenuData");
-@@ -2944,7 +3261,7 @@ void mnMain_Scene_OnEnter(void* user_data)
+@@ -2944,7 +3291,7 @@ void mnMain_Scene_OnEnter(void* user_data)
  
      switch (data->menu_kind) {
      case MENU_KIND_EVENT:
@@ -186654,7 +187142,7 @@ index dc6746eee..b53251c6f 100644
          break;
      case MENU_KIND_MULTI_VS:
          mnHyaku_8024CD64(data->hovered_selection);
-@@ -2959,7 +3276,11 @@ void mnMain_Scene_OnEnter(void* user_data)
+@@ -2959,7 +3306,11 @@ void mnMain_Scene_OnEnter(void* user_data)
          break;
      }
      lbAudioAx_80023F28(gmMainLib_8015ECB0());
@@ -186667,7 +187155,7 @@ index dc6746eee..b53251c6f 100644
  }
  
  char null_terminator[1] = "\0";
-@@ -3043,3 +3364,48 @@ void mn_8022EBDC(void)
+@@ -3043,3 +3394,48 @@ void mn_8022EBDC(void)
  /// fn_8022F538\n"); } void mn_8022FB88() { OSPanic(__FILE__, __LINE__, "not
  /// implemented: mn_8022FB88\n"); } void mn_8022FD18() { OSPanic(__FILE__,
  /// __LINE__, "not implemented: mn_8022FD18\n"); }
@@ -189476,7 +189964,7 @@ index e03ab11ef..488225f8d 100644
      proc = HSD_GObj_SetupProc(GObj_Create(0U, 1U, 0x80U), fn_8024B2B0, 0U);
      proc->flags_3 = (u16) HSD_GObj_804D783C;
 diff --git a/src/melee/mn/mnstagesel.c b/src/melee/mn/mnstagesel.c
-index dfb2b5510..7271d7c75 100644
+index dfb2b5510..567ff75f6 100644
 --- a/src/melee/mn/mnstagesel.c
 +++ b/src/melee/mn/mnstagesel.c
 @@ -2,9 +2,9 @@
@@ -189490,7 +189978,7 @@ index dfb2b5510..7271d7c75 100644
  #include <melee/gm/gm_unsplit.h>
  #include <melee/gm/gmmain_lib.h>
  #include <melee/lb/lb_00B0.h>
-@@ -15,6 +15,18 @@
+@@ -15,6 +15,19 @@
  #include <melee/lb/lblanguage.h>
  #include <melee/lb/types.h>
  #include <sysdolphin/baselib/controller.h>
@@ -189503,13 +189991,14 @@ index dfb2b5510..7271d7c75 100644
 +#include <mu_native.h>
 +#endif
 +#include <sysdolphin/baselib/dobj.h>
++#include <sysdolphin/baselib/displayfunc.h>
 +#include <sysdolphin/baselib/mobj.h>
 +#include <sysdolphin/baselib/robj.h>
 +#endif
  #include <sysdolphin/baselib/fog.h>
  #include <sysdolphin/baselib/gobj.h>
  #include <sysdolphin/baselib/gobjgxlink.h>
-@@ -27,6 +39,255 @@
+@@ -27,6 +40,255 @@
  #include <sysdolphin/baselib/memory.h>
  #include <sysdolphin/baselib/random.h>
  
@@ -189765,7 +190254,7 @@ index dfb2b5510..7271d7c75 100644
  /// @todo .sdata2 order hack
  #ifdef MUST_MATCH
  static void order_sdata2(void)
-@@ -35,6 +296,390 @@ static void order_sdata2(void)
+@@ -35,6 +297,390 @@ static void order_sdata2(void)
  }
  #endif
  
@@ -190156,7 +190645,7 @@ index dfb2b5510..7271d7c75 100644
  /// Random stage selection
  /// Returns an internal stage ID - 2 (since first 2 internal stage IDs are
  /// invalid)
-@@ -45,9 +690,14 @@ int mnStageSel_802599EC(void)
+@@ -45,9 +691,14 @@ int mnStageSel_802599EC(void)
      bool var_r29 = true;
      int i;
  
@@ -190172,7 +190661,7 @@ index dfb2b5510..7271d7c75 100644
          {
              break;
          }
-@@ -65,7 +715,7 @@ int mnStageSel_802599EC(void)
+@@ -65,7 +716,7 @@ int mnStageSel_802599EC(void)
          }
          for (i = 0; i < NUM_STAGES; i++) {
              if (mnStageSel_803F06D0[i].x4 == 0 &&
@@ -190181,7 +190670,7 @@ index dfb2b5510..7271d7c75 100644
              {
                  var_r29 = false;
              }
-@@ -75,7 +725,7 @@ int mnStageSel_802599EC(void)
+@@ -75,7 +726,7 @@ int mnStageSel_802599EC(void)
          int tmp = HSD_Randi(NUM_STAGES);
          i = tmp;
          if (mnStageSel_803F06D0[i].x4 == 0) {
@@ -190190,7 +190679,7 @@ index dfb2b5510..7271d7c75 100644
                  break;
              }
          }
-@@ -106,6 +756,39 @@ void mnStageSel_80259C28(void)
+@@ -106,6 +757,39 @@ void mnStageSel_80259C28(void)
      if (mnStageSel_804D6CA4 != 0) {
          return;
      }
@@ -190230,7 +190719,7 @@ index dfb2b5510..7271d7c75 100644
      switch (mnStageSel_804D6CAE) {
      case 30:
          if (!(mnStageSel_804D6CA0 & 0x1000)) {
-@@ -131,18 +814,38 @@ void mnStageSel_80259C28(void)
+@@ -131,18 +815,38 @@ void mnStageSel_80259C28(void)
      }
      mnStageSel_804D6CAE = mnStageSel_802599EC();
  skip_randomize:
@@ -190274,7 +190763,7 @@ index dfb2b5510..7271d7c75 100644
      sfxForward();
  }
  
-@@ -166,7 +869,34 @@ void fn_80259D84(HSD_GObj* gobj)
+@@ -166,7 +870,34 @@ void fn_80259D84(HSD_GObj* gobj)
          if (mnStageSel_804D6CAF == 0) {
              mnStageSel_80259C28();
          }
@@ -190309,7 +190798,7 @@ index dfb2b5510..7271d7c75 100644
              if (temp_r31->x0 < 0x1E &&
                  mnStageSel_803F06D0[temp_r31->x0].x8 >= 2)
              {
-@@ -175,7 +905,11 @@ void fn_80259D84(HSD_GObj* gobj)
+@@ -175,7 +906,11 @@ void fn_80259D84(HSD_GObj* gobj)
              sfxMove();
              temp_r31->x4 = 0;
              temp_r31->x2 = 2;
@@ -190321,7 +190810,7 @@ index dfb2b5510..7271d7c75 100644
          }
          break;
      case 2:
-@@ -204,17 +938,47 @@ void mnStageSel_80259ED8(int id)
+@@ -204,17 +939,47 @@ void mnStageSel_80259ED8(int id)
      u8 _[4];
  
      gobj = GObj_Create(HSD_GOBJ_CLASS_FIGHTER, 5, 0x80);
@@ -190373,7 +190862,7 @@ index dfb2b5510..7271d7c75 100644
      temp_r3_2->x0 = id;
      temp_r3_2->x4 = 0;
      temp_r3_2->x2 = 0;
-@@ -232,6 +996,12 @@ void fn_8025A090(HSD_GObj* gobj)
+@@ -232,6 +997,12 @@ void fn_8025A090(HSD_GObj* gobj)
      }* temp_r30;
      HSD_JObj* jobj;
  
@@ -190386,20 +190875,60 @@ index dfb2b5510..7271d7c75 100644
      jobj = GET_JOBJ(gobj);
      temp_r30 = HSD_GObjGetUserData(gobj);
      var_r3 = mnStageSel_804D6CAE;
-@@ -299,6 +1069,12 @@ void fn_8025A310(HSD_GObj* gobj)
+@@ -266,6 +1037,23 @@ void fn_8025A090(HSD_GObj* gobj)
+     }
+ }
+ 
++#ifdef MU_NATIVE
++static float mu_rui_sss_cur_x;
++static float mu_rui_sss_cur_y;
++static void mu_rui_sss_camera_render(HSD_GObj* gobj, intptr_t pass)
++{
++    if (mu_rui_sss_active()) {
++        if (HSD_CObjSetCurrent(gobj->hsd_obj)) {
++            HSD_SetEraseColor(10, 15, 24, 255);
++            HSD_CObjEraseScreen(gobj->hsd_obj, 1, 0, 1);
++            HSD_CObjEndCurrent();
++        }
++        return;
++    }
++    HSD_GObj_803910D8(gobj, pass);
++}
++#endif
++
+ void fn_8025A310(HSD_GObj* gobj)
+ {
+     Vec3 sp1C;
+@@ -299,6 +1087,28 @@ void fn_8025A310(HSD_GObj* gobj)
  
      HSD_JObjSetTranslate(jobj, &sp1C);
      lb_8000B1CC(jobj, NULL, &sp1C);
 +#ifdef MU_NATIVE
++    mu_rui_sss_cur_x = sp1C.x;
++    mu_rui_sss_cur_y = sp1C.y;
 +    if (mexsel_map != NULL) {
 +        mnStageSel_MexHover(&sp1C);
++        return;
++    }
++    if (mu_rui_sss_active()) {
++        unsigned int unlocked_mask = 0;
++        int hit = -1;
++        for (i = 0; i < NUM_STAGES; ++i) {
++            if (mnStageSel_803F06D0[i].x8 != 0) unlocked_mask |= (1u << i);
++        }
++        if (mu_rui_sss_hit_test(sp1C.x, sp1C.y, unlocked_mask, &hit)) {
++            if (mnStageSel_SlippiExtras()) {
++                mnStageSel_CursorOnHover(jobj, hit);
++            }
++            mnStageSel_804D6CAE = (u8) hit;
++        }
 +        return;
 +    }
 +#endif
      for (i = 0; i < 0x1E; i++) {
          if (mnStageSel_803F06D0[i].x8 != 0) {
              lb_8000B1CC(mnStageSel_803F06D0[i].x0, NULL, &sp10);
-@@ -308,6 +1084,11 @@ void fn_8025A310(HSD_GObj* gobj)
+@@ -308,6 +1118,11 @@ void fn_8025A310(HSD_GObj* gobj)
                  if (sp10.y - mnStageSel_803F06D0[i].x10 < sp1C.y &&
                      sp10.y + mnStageSel_803F06D0[i].x10 > sp1C.y)
                  {
@@ -190411,7 +190940,7 @@ index dfb2b5510..7271d7c75 100644
                      mnStageSel_804D6CAE = i;
                      return;
                  }
-@@ -325,6 +1106,23 @@ void fn_8025A560(HSD_GObj* gobj)
+@@ -325,6 +1140,23 @@ void fn_8025A560(HSD_GObj* gobj)
      HSD_JObj* jobj = GET_JOBJ(gobj);
      temp_r30 = HSD_GObjGetUserData(gobj);
  
@@ -190435,7 +190964,7 @@ index dfb2b5510..7271d7c75 100644
      if (mnStageSel_804D6CAE < 0x16 && (mnStageSel_804D6CAE & 1) &&
          mnStageSel_803F06D0[mnStageSel_804D6CAE].x8 == 0)
      {
-@@ -360,7 +1158,7 @@ void fn_8025A91C(HSD_GObj* gobj)
+@@ -360,7 +1192,7 @@ void fn_8025A91C(HSD_GObj* gobj)
      }
  }
  
@@ -190444,7 +190973,7 @@ index dfb2b5510..7271d7c75 100644
  {
      HSD_FogSet(gobj->hsd_obj);
  }
-@@ -372,26 +1170,26 @@ static inline void make_stage_icon(HSD_JObj** out)
+@@ -372,26 +1204,26 @@ static inline void make_stage_icon(HSD_JObj** out)
      HSD_GObj* gobj;
      HSD_JObj* jobj;
      gobj = GObj_Create(4, 5, 0x80);
@@ -190479,7 +191008,7 @@ index dfb2b5510..7271d7c75 100644
  }
  
  static inline void make_bg_model(HSD_JObj** out)
-@@ -399,13 +1197,18 @@ static inline void make_bg_model(HSD_JObj** out)
+@@ -399,13 +1231,18 @@ static inline void make_bg_model(HSD_JObj** out)
      HSD_GObj* gobj;
      HSD_JObj* jobj;
      gobj = GObj_Create(4, 5, 0x80);
@@ -190502,7 +191031,7 @@ index dfb2b5510..7271d7c75 100644
      *out = gobj->hsd_obj;
  }
  
-@@ -414,13 +1217,13 @@ static inline void make_icon_root(HSD_JObj** icons)
+@@ -414,13 +1251,13 @@ static inline void make_icon_root(HSD_JObj** icons)
      HSD_GObj* gobj;
      HSD_JObj* jobj;
      gobj = GObj_Create(4, 5, 0x80);
@@ -190520,7 +191049,7 @@ index dfb2b5510..7271d7c75 100644
      icons[0] = GET_JOBJ(gobj)->child;
      HSD_JObjReqAnimAll(icons[0], 0.0F);
      HSD_JObjAnimAll(icons[0]);
-@@ -439,35 +1242,77 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -439,41 +1276,87 @@ void mnStageSel_Scene_OnEnter(void* arg0)
      Vec3 spCC;
  
      int i;
@@ -190609,7 +191138,17 @@ index dfb2b5510..7271d7c75 100644
  
          {
              HSD_GObj* gobj = mnStageSel_804D6C9C = GObj_Create(2, 3, 0x80);
-@@ -483,8 +1328,8 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+             HSD_CObj* cobj = HSD_CObjLoadDesc(MenMain_cam);
+             HSD_GObjObject_80390A70(gobj, HSD_GObj_CameraKind, cobj);
++#ifdef MU_NATIVE
++            GObj_SetupGXLinkMax(gobj, mu_rui_sss_camera_render, 0);
++#else
+             GObj_SetupGXLinkMax(gobj, HSD_GObj_803910D8, 0);
++#endif
+             gobj->gxlink_prios = 0x11;
+             HSD_GObj_SetupProc(gobj, mn_8022BA1C, 5);
+         }
+@@ -483,8 +1366,8 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_LObj* lobj1;
              HSD_LObj* lobj2;
              gobj = GObj_Create(3, 4, 0x80);
@@ -190620,7 +191159,7 @@ index dfb2b5510..7271d7c75 100644
              HSD_LObjSetNext(lobj1, lobj2);
              HSD_GObjObject_80390A70(gobj, (u8) HSD_GObj_LightKind, lobj1);
              GObj_SetupGXLink(gobj, HSD_GObj_LObjCallback, 0, 0x80);
-@@ -492,7 +1337,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -492,7 +1375,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
  
          {
              HSD_GObj* gobj = GObj_Create(0xE, 0xF, 0);
@@ -190629,7 +191168,7 @@ index dfb2b5510..7271d7c75 100644
              HSD_GObjObject_80390A70(gobj, HSD_GObj_FogKind, fog);
              GObj_SetupGXLink(gobj, fn_8025A974, 0, 0x80);
          }
-@@ -518,6 +1363,12 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -518,6 +1401,12 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObjAnimAll(temp_r22_4);
          }
  
@@ -190642,7 +191181,7 @@ index dfb2b5510..7271d7c75 100644
          make_icon_root(spDC);
  
          for (i = 0; i < 0x12; i++) {
-@@ -529,6 +1380,9 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -529,6 +1418,9 @@ void mnStageSel_Scene_OnEnter(void* arg0)
          for (i = 0; i < 0x1D; i++) {
              mnStageSel_803F06D0[i].x8 =
                  gm_80164430(mnStageSel_803F06D0[i].stkind) ? 2 : 1;
@@ -190652,7 +191191,7 @@ index dfb2b5510..7271d7c75 100644
          }
  
          for (i = 0; i <= 0xA; i++) {
-@@ -578,13 +1432,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -578,13 +1470,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              s32 temp_r22_7;
              HSD_JObj* temp_r23_3;
@@ -190670,7 +191209,7 @@ index dfb2b5510..7271d7c75 100644
              temp_r23_3 = gobj->hsd_obj;
              lb_8000C1C0(temp_r23_3, spDC[i]);
              mnStageSel_803F06D0[i + 13].x0 = temp_r23_3;
-@@ -606,13 +1460,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -606,13 +1498,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObj* jobj;
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              HSD_JObj* temp_r22_8;
@@ -190688,7 +191227,7 @@ index dfb2b5510..7271d7c75 100644
              temp_r22_8 = gobj->hsd_obj;
              lb_8000C1C0(temp_r22_8, spDC[0x10]);
              do_anim(temp_r22_8, 2);
-@@ -625,14 +1479,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -625,14 +1517,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              s32 temp_r22_9;
              HSD_JObj* temp_r23_6;
@@ -190707,7 +191246,7 @@ index dfb2b5510..7271d7c75 100644
  
              temp_r23_6 = gobj->hsd_obj;
              lb_8000C1C0(temp_r23_6, spDC[i]);
-@@ -650,24 +1504,36 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -650,24 +1542,36 @@ void mnStageSel_Scene_OnEnter(void* arg0)
                  break;
              }
          }
@@ -190748,7 +191287,7 @@ index dfb2b5510..7271d7c75 100644
                  g = gobj;
                  jobj2 = jobj;
                  HSD_GObj_SetupProc(g, fn_8025A310, 2);
-@@ -680,20 +1546,24 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -680,20 +1584,24 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObj* jobj;
              HSD_GObj* gobj;
              gobj = GObj_Create(HSD_GOBJ_CLASS_FIGHTER, 5, 0x80);
@@ -190777,7 +191316,7 @@ index dfb2b5510..7271d7c75 100644
                  userdata->x4 = 0;
                  userdata->x2 = 0;
              }
-@@ -702,13 +1572,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -702,13 +1610,13 @@ void mnStageSel_Scene_OnEnter(void* arg0)
          {
              HSD_JObj* jobj;
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
@@ -190795,7 +191334,7 @@ index dfb2b5510..7271d7c75 100644
  
              {
                  HSD_GObj* g;
-@@ -735,14 +1605,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
+@@ -735,14 +1643,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
              HSD_JObj* jobj;
              HSD_GObj* gobj = GObj_Create(4, 5, 0x80);
              HSD_JObj* temp_r3_15 =
@@ -190814,8 +191353,26 @@ index dfb2b5510..7271d7c75 100644
              jobj = gobj->hsd_obj;
              temp_r3_16 = HSD_MemAlloc(sizeof(*temp_r3_16));
              GObj_InitUserData(gobj, 4, HSD_Free, temp_r3_16);
-@@ -765,16 +1635,35 @@ void mnStageSel_Scene_OnFrame(void)
+@@ -763,18 +1671,53 @@ static inline HSD_PadStatus* get_pad(u8 i)
+ /// OnFrame
+ void mnStageSel_Scene_OnFrame(void)
  {
++#ifdef MU_NATIVE
++    {
++        unsigned int unlocked_mask = 0, struck_mask = 0;
++        int i;
++        int hover = (int) mnStageSel_804D6CAE;
++        int stkind = (hover >= 0 && hover < 30) ? (int) mnStageSel_803F06D0[hover].stkind : 0;
++        for (i = 0; i < NUM_STAGES; ++i) {
++            if (mnStageSel_803F06D0[i].x8 != 0 || mu_te_struck[i]) unlocked_mask |= (1u << i);
++            if (mu_te_struck[i]) struck_mask |= (1u << i);
++        }
++        mu_rui_note_sss(mexsel_map != NULL ? 1 : 0, mnStageSel_804D6CAF != 0 ? 1 : 0,
++                        mnStageSel_804D6CAF == 2 ? 1 : 0, hover, stkind,
++                        mu_slippi_sss_frozen(), mu_slippi_on_online_sss() ? 1 : 0,
++                        unlocked_mask, struck_mask, mu_rui_sss_cur_x, mu_rui_sss_cur_y);
++    }
++#endif
      if (sss_data->force_stage_id >= 0) {
          mnStageSel_804D6CAF = 2;
 +#ifdef MU_NATIVE
@@ -190850,7 +191407,7 @@ index dfb2b5510..7271d7c75 100644
          gm_801A4B60();
          return;
      }
-@@ -819,15 +1708,58 @@ void mnStageSel_Scene_OnFrame(void)
+@@ -819,15 +1762,58 @@ void mnStageSel_Scene_OnFrame(void)
          mnStageSel_804D6CA4 -= 1;
          return;
      }
@@ -190909,7 +191466,7 @@ index dfb2b5510..7271d7c75 100644
          gm_801A4B60();
      }
  }
-@@ -838,6 +1770,10 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
+@@ -838,6 +1824,10 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
          lbArchive_80016EFC(mnStageSel_804D6C94);
          mnStageSel_804D6C94 = NULL;
      }
@@ -190920,7 +191477,7 @@ index dfb2b5510..7271d7c75 100644
      {
          SSSData* sss = sss_data;
          sss->start_game = mnStageSel_804D6CAF == 2 ? true : false;
-@@ -851,10 +1787,22 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
+@@ -851,10 +1841,22 @@ void mnStageSel_Scene_OnExit(UNUSED void* exit_data)
  
  int mnSelStageRandom(void)
  {

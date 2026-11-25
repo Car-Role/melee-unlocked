@@ -68,6 +68,7 @@
 #include "gx_retro.h"
 #include "gx_shader.h"
 #include "render_options.h"
+#include "redesigned_ui.h"
 #include "training_overlay.h"
 #include "ghost_ai.h"
 #include "practice_cpu.h"
@@ -5583,6 +5584,8 @@ MuHostApi make_host() {
   h.hud_extras = h_hud_extras;
   h.native_rtx_semantics = h_native_rtx_semantics;
   h.hud_pro_tag = h_hud_pro_tag;
+  h.redesigned_ui_flags = []() -> uint32_t { return gx::redesigned_ui::flags(); };
+  h.redesigned_ui_snapshot = [](const MuRedesignedUiSnapshot* snap) { gx::redesigned_ui::publish_snapshot(snap); };
   return h;
 }
 

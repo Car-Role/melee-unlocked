@@ -44,6 +44,22 @@ void mu_hud_pro_tag_abi(int slot, float dx, float width)
     }
 }
 
+unsigned int mu_rui_flags_abi(void)
+{
+    if (mu_host != NULL && mu_host->version >= 34 && mu_host->redesigned_ui_flags != NULL) {
+        return (unsigned int) mu_host->redesigned_ui_flags();
+    }
+    return 0;
+}
+
+void mu_rui_snapshot_abi(const void* snapshot)
+{
+    if (mu_host != NULL && mu_host->version >= 34 && mu_host->redesigned_ui_snapshot != NULL &&
+        snapshot != NULL) {
+        mu_host->redesigned_ui_snapshot((const MuRedesignedUiSnapshot*) snapshot);
+    }
+}
+
 void mu_hud_combo_abi(int slot, int link, float percent, int stunned)
 {
     if (mu_host->version >= 21 && mu_host->hud_combo != NULL) {

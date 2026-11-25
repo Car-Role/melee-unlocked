@@ -65,3 +65,15 @@ will remove those additions without affecting the other appearance options.
 YAMPP's source credits list licenses for components it uses, but the review
 checkout did not provide a top-level YAMPP license grant. Do not copy a YAMPP
 file into this project until its applicable file-level license is confirmed.
+
+## Redesigned UI (optional)
+
+The optional Redesigned UI refresh (`port/runtime/gx/ui_sources/redesigned/`,
+invoked through `port/runtime/gx/redesigned_ui.h` and `redesigned_ui.cpp`) is a
+clean-room GPL-2.0-or-later implementation inspired visually by Dave Abarra's
+"Melee Redesigned" concept videos (`XbPBV71g1_s` and `ZC3DofH1h7Q`). No assets,
+wallpapers, fonts, or code from Dave Abarra or Nintendo are stored in this
+repository: fighter portraits, stock icons, and stage previews are decoded at
+runtime from the player's own Melee NTSC 1.02 ISO when present, with procedural
+vector fallbacks otherwise. See `port/runtime/gx/ui_sources/redesigned/ORIGIN.md`
+for the full boundary and removal checklist.
