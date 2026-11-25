@@ -213,6 +213,12 @@ void shutdown() {
 
 void draw_snapshot_for_test(const MuRedesignedUiSnapshot& snapshot, ImDrawList* draw_list,
                             ImVec2 picture_min, ImVec2 picture_max, float time_sec, float dt) {
+  std::string iso;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    iso = g_iso_path;
+  }
+  g_assets.set_iso(iso);
   std::string empty_names[4];
   render_snapshot_impl(snapshot, draw_list, picture_min, picture_max, time_sec, dt, empty_names);
 }

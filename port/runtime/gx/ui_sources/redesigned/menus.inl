@@ -113,12 +113,12 @@ inline void draw_main_menu(ImDrawList* dl, const theme::Fonts& fonts, MenuAnimSt
                            const MuRedesignedUiSnapshot& snap, ImVec2 pic_min, ImVec2 pic_max,
                            float u, float t, float dt) {
   if (!snap.menu_supported) return;
-  const bool online_main = (snap.menu_item_count >= 6);
-  const auto* def = theme::menu_def(snap.menu_kind, online_main);
+  const auto* def = theme::menu_def(snap.menu_kind, (int)snap.menu_online_page);
   if (!def) return;
 
-  if (anim.last_menu_kind != (int)snap.menu_kind) {
-    anim.last_menu_kind = (int)snap.menu_kind;
+  const int anim_key = (int)snap.menu_kind * 4 + (int)snap.menu_online_page;
+  if (anim.last_menu_kind != anim_key) {
+    anim.last_menu_kind = anim_key;
     anim.menu_enter_t = 0.0f;
     anim.cursor_y_smooth = -1.0f;
   }
@@ -157,31 +157,51 @@ inline void draw_main_menu(ImDrawList* dl, const theme::Fonts& fonts, MenuAnimSt
 
   // Online page sub-badge on MENU_KIND_8
   if (snap.menu_kind == 8) {
-    char obuf[48];
-    std::snprintf(obuf, sizeof obuf, "ONLINE PAGE %d  |  ROLLBACK NETPLAY", (int)snap.menu_online_page + 1);
+    const char* obuf = (snap.menu_online_page == 1)
+                           ? "SLIPPI PAGE  |  Z FOR YOUGAME"
+                           : "YOUGAME PAGE  |  Z FOR SLIPPI";
     theme::draw_text_tracked(dl, f_body, 12.0f * u, ImVec2(lx + 440.0f * u, top_y + 42.0f * u),
                              theme::emerald(0.90f * ep), obuf, 2.0f * u, true);
   }
 
-  // Determine how many visible rows we draw
-  int visible_count = def->count;
-  if (snap.menu_item_count > 0 && snap.menu_item_count <= visible_count) {
-    visible_count = (int)snap.menu_item_count;
+  // Collect visible rows, skipping Melee's hidden placeholder slots (e.g. SEL_1P_2 offline, SEL_TOY_2)
+  int max_items = def->count;
+  if (snap.menu_item_count > 0 && snap.menu_item_count < max_items) {
+    max_items = (int)snap.menu_item_count;
   }
-  while (visible_count > 1 && (!def->items[visible_count - 1] || !def->items[visible_count - 1][0])) {
-    --visible_count;
+  int shown_idx[8];
+  int visible_count = 0;
+  for (int i = 0; i < max_items && i < 8; ++i) {
+    if (!def->items[i] || !def->items[i][0]) continue;
+    if (snap.menu_item_mask != 0u && (((snap.menu_item_mask >> i) & 1u) == 0u) &&
+        i != (int)snap.menu_selection) {
+      continue;
+    }
+    shown_idx[visible_count++] = i;
+  }
+  if (visible_count == 0) {
+    shown_idx[0] = 0;
+    visible_count = 1;
   }
 
-  const int sel = std::clamp((int)snap.menu_selection, 0, std::max(0, visible_count - 1));
+  int sel_row = 0;
+  for (int r = 0; r < visible_count; ++r) {
+    if (shown_idx[r] == (int)snap.menu_selection) {
+      sel_row = r;
+      break;
+    }
+  }
+  const int sel_item = shown_idx[sel_row];
+
   const float row_h = (visible_count >= 7) ? 38.0f * u : 46.0f * u;
   const float list_top = hl_y + 24.0f * u;
-  const float target_cy = list_top + (float)sel * row_h + row_h * 0.5f;
+  const float target_cy = list_top + (float)sel_row * row_h + row_h * 0.5f;
   if (anim.cursor_y_smooth < 0.0f) anim.cursor_y_smooth = target_cy;
   else anim.cursor_y_smooth = smooth_step(anim.cursor_y_smooth, target_cy, 24.0f, dt);
 
   // Subtle horizontal highlight bar tracking the selected row smoothly
   const ImVec2 h0(lx - 10.0f * u, anim.cursor_y_smooth - row_h * 0.44f);
-  const ImVec2 h1(lx + 380.0f * u, anim.cursor_y_smooth + row_h * 0.44f);
+  const ImVec2 h1(lx + 420.0f * u, anim.cursor_y_smooth + row_h * 0.44f);
   dl->AddRectFilledMultiColor(h0, h1,
                               theme::rgba(255, 255, 255, 0.10f * ep),
                               theme::rgba(255, 255, 255, 0.0f),
@@ -193,12 +213,12 @@ inline void draw_main_menu(ImDrawList* dl, const theme::Fonts& fonts, MenuAnimSt
   dl->AddTriangleFilled(ImVec2(lx, tri_y - 5.5f * u), ImVec2(lx, tri_y + 5.5f * u),
                         ImVec2(lx + 9.0f * u, tri_y), theme::white(ep));
 
-  for (int i = 0; i < visible_count; ++i) {
-    const char* label = def->items[i];
-    if (!label || !*label) continue;
-    const bool selected = (i == sel);
-    const bool enabled = (snap.menu_item_mask == 0u) || (((snap.menu_item_mask >> i) & 1u) != 0u);
-    const float ry = list_top + (float)i * row_h;
+  for (int r = 0; r < visible_count; ++r) {
+    const int idx = shown_idx[r];
+    const char* label = def->items[idx];
+    const bool selected = (r == sel_row);
+    const bool enabled = (snap.menu_item_mask == 0u) || (((snap.menu_item_mask >> idx) & 1u) != 0u);
+    const float ry = list_top + (float)r * row_h;
     const float fsz = (selected ? 25.0f : 21.0f) * u * (visible_count >= 7 ? 0.90f : 1.0f);
     const float tx = lx + (selected ? 22.0f * u : 16.0f * u);
     const ImU32 col = !enabled ? theme::muted(0.45f * ep)
@@ -211,7 +231,7 @@ inline void draw_main_menu(ImDrawList* dl, const theme::Fonts& fonts, MenuAnimSt
   const float desc_hl_y = list_top + (float)visible_count * row_h + 18.0f * u;
   dl->AddLine(ImVec2(lx, desc_hl_y), ImVec2(lx + 420.0f * u, desc_hl_y),
               theme::hairline(0.32f * ep), std::max(1.0f, 1.2f * u));
-  const char* desc = (sel < def->count && def->descs[sel]) ? def->descs[sel] : "";
+  const char* desc = (sel_item < def->count && def->descs[sel_item]) ? def->descs[sel_item] : "";
   if (*desc) {
     dl->AddText(f_body, 14.5f * u, ImVec2(lx, desc_hl_y + 12.0f * u),
                 theme::silver(0.86f * ep), desc, nullptr, 460.0f * u);
@@ -223,6 +243,10 @@ inline void draw_main_menu(ImDrawList* dl, const theme::Fonts& fonts, MenuAnimSt
   px += theme::draw_gc_prompt(dl, f_body, ImVec2(px, by), u, theme::GcButton::A, "Select", ep);
   if (snap.menu_kind != 0) {
     px += theme::draw_gc_prompt(dl, f_body, ImVec2(px, by), u, theme::GcButton::B, "Back", ep);
+  }
+  if (snap.menu_kind == 8 && snap.menu_online_sub) {
+    px += theme::draw_gc_prompt(dl, f_body, ImVec2(px, by), u, theme::GcButton::Z,
+                                snap.menu_online_page == 1 ? "YouGame" : "Slippi", ep);
   }
   const char* f1 = "F1  PC SETTINGS";
   const float f1_w = theme::measure_tracked(f_body, 12.5f * u, f1, 1.8f * u);
@@ -329,19 +353,10 @@ inline void draw_css(ImDrawList* dl, const theme::Fonts& fonts, assets::DiscAsse
     dl->AddRectFilled(pa, pb, theme::rgba(12, 18, 30, 0.72f), 2.0f * u);
 
     if (ckind >= 0) {
-      ImTextureData* ctex = bank.css_icon(ckind);
-      if (ctex) {
-        // Fit square ISO portrait crisply inside upper portrait panel with soft atmospheric blend
-        const float ph_avail = pb.y - pa.y;
-        const float img_sz = std::min(slot_w * 0.88f, ph_avail * 0.90f);
-        const ImVec2 ia(sx + (slot_w - img_sz) * 0.5f, pa.y + (ph_avail - img_sz) * 0.38f);
-        const ImVec2 ib(ia.x + img_sz, ia.y + img_sz);
-        assets::draw_fighter_portrait_card(dl, f_disp, ia, ib, ckind, cp.costume, ctex,
-                                           cp.locked ? 1.0f : 0.78f, true);
-      } else {
-        assets::draw_fighter_portrait_card(dl, f_disp, pa, pb, ckind, cp.costume, nullptr,
-                                           cp.locked ? 1.0f : 0.75f, true);
-      }
+      ImTextureData* ctex = bank.csp_portrait(ckind, cp.costume);
+      if (!ctex) ctex = bank.css_icon(ckind);
+      assets::draw_fighter_portrait_card(dl, f_disp, pa, pb, ckind, cp.costume, ctex,
+                                         cp.locked ? 1.0f : 0.78f, true);
       // Subtle lower gradient so bold 2-line fighter name pops cleanly
       dl->AddRectFilledMultiColor(ImVec2(pa.x, pb.y - hero_h * 0.48f), pb,
                                   theme::rgba(6, 10, 18, 0.0f), theme::rgba(6, 10, 18, 0.0f),

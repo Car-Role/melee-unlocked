@@ -821,6 +821,8 @@ void mu_slippi_signin_notice(struct HSD_GObj* menu);
 struct HSD_Text;
 void mu_slippi_menu_description(struct HSD_Text* text, const char* message);
 void mu_online_pages_describe(struct HSD_Text* text, int row);   /* shim/mu_online_pages.inc: each new online menu description */
+int mu_slippi_online_pages(void);
+int mu_online_pages_page(void);
 void mu_slippi_tournament_notice(struct HSD_GObj* menu, const char* message);
 struct HSD_JObj;
 void mu_slippi_friends_label(struct HSD_JObj* label, int menu_kind, int selection, int capture); /* shim/mu_menu_label.c */

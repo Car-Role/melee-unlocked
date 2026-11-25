@@ -296,9 +296,9 @@ inline const StageInfo& stage_info_by_icon(int icon_idx) {
     {"JUNGLE JAPES",            "JUNGLE JAPES",     48, 124,  78,  20,  54,  38, 0x0C}, // 3
     {"GREAT BAY",               "GREAT BAY",        46, 134, 186,  20,  58,  92, 0x0D}, // 4
     {"HYRULE TEMPLE",           "TEMPLE",          116, 142, 188,  44,  62,  86, 0x0E}, // 5
-    {"FOUNTAIN OF DREAMS",      "FOUNTAIN",         86,  72, 178,  24,  28,  76, 0x08}, // 6
+    {"YOSHI'S STORY",           "YOSHI'S STORY",   106, 178,  92,  44,  92,  52, 0x08}, // 6
     {"GREEN GREENS",            "GREEN GREENS",     72, 168,  96,  28,  76,  44, 0x10}, // 7
-    {"YOSHI'S STORY",           "YOSHI'S STORY",   106, 178,  92,  44,  92,  52, 0x02}, // 8
+    {"FOUNTAIN OF DREAMS",      "FOUNTAIN",         86,  72, 178,  24,  28,  76, 0x02}, // 8
     {"YOSHI'S ISLAND",          "YOSHI'S ISLAND",   92, 164, 118,  38,  84,  58, 0x11}, // 9
     {"CORNERIA",                "CORNERIA",         66,  94, 148,  26,  38,  68, 0x07}, // 10
     {"VENOM",                   "VENOM",           148,  98,  58,  62,  38,  24, 0x16}, // 11
@@ -333,40 +333,27 @@ struct MenuDef {
   const char* descs[8];
 };
 
-inline const MenuDef* menu_def(int menu_kind, bool is_online_enabled) {
-  static const MenuDef kMainOnline = {
-    "MAIN MENU", 6,
-    {"1-P MODE", "VS. MODE", "ONLINE PLAY", "TROPHIES", "OPTIONS", "DATA"},
+inline const MenuDef* menu_def(int menu_kind, int online_page) {
+  static const MenuDef kMain = {
+    "MAIN MENU", 5,
+    {"1-P MODE", "VS. MODE", "TROPHIES", "OPTIONS", "DATA"},
     {
-      "Play Classic, Adventure, All-Star, Events, Stadium, or Training.",
-      "Battle locally in Melee, Tournament, or Special Melee.",
-      "Play online with Slippi and YouGame rollback netplay.",
-      "Browse your trophy collection and lottery.",
-      "Adjust audio, screen, rumble, language, and PC Settings.",
-      "View battle records, archives, and sound test."
-    }
-  };
-  static const MenuDef kMainVanilla = {
-    "MAIN MENU", 6,
-    {"1-P MODE", "VS. MODE", "TROPHIES", "OPTIONS", "DATA", ""},
-    {
-      "Play Classic, Adventure, All-Star, Events, Stadium, or Training.",
+      "Play Single-Player modes, Training, or Online Play.",
       "Battle locally in Melee, Tournament, or Special Melee.",
       "Browse your trophy collection and lottery.",
       "Adjust audio, screen, rumble, language, and PC Settings.",
-      "View battle records, archives, and sound test.",
-      ""
+      "View snapshots, archives, sound test, and VS. records."
     }
   };
   static const MenuDef k1P = {
     "1-P MODE", 5,
-    {"REGULAR MATCH", "EVENT MATCH", "STADIUM", "TRAINING", ""},
+    {"REGULAR MATCH", "EVENT MATCH", "ONLINE PLAY", "STADIUM", "TRAINING"},
     {
       "Play Classic, Adventure, or All-Star single-player campaigns.",
       "Take on themed challenges and event battles.",
+      "Play online with YouGame and Slippi rollback netplay.",
       "Compete in Target Test, Home-Run Contest, and Multi-Man Melee.",
-      "Practice combos, movement, and setups freely.",
-      ""
+      "Practice combos, movement, and setups freely."
     }
   };
   static const MenuDef kReg = {
@@ -379,27 +366,36 @@ inline const MenuDef* menu_def(int menu_kind, bool is_online_enabled) {
     }
   };
   static const MenuDef kVs = {
-    "VS. MODE", 6,
-    {"MELEE", "TOURNAMENT MELEE", "SPECIAL MELEE", "CUSTOM RULES", "NAME ENTRY", ""},
+    "VS. MODE", 5,
+    {"MELEE", "TOURNAMENT MELEE", "SPECIAL MELEE", "CUSTOM RULES", "NAME ENTRY"},
     {
       "Standard multiplayer Smash battle with custom rules.",
       "Bracket tournament play for up to 64 entrants.",
       "Play Camera, Stamina, Super Sudden Death, Giant, and more.",
       "Configure stock count, time limit, items, and stage select.",
-      "Create and manage player name tags.",
-      ""
+      "Create and manage player name tags."
     }
   };
-  static const MenuDef kOnline = {
+  static const MenuDef kOnlineYouGame = {
     "ONLINE PLAY", 6,
-    {"RANKED", "UNRANKED", "DIRECT", "TEAMS", "FRIENDS", "SLIPPI / LOGIN"},
+    {"YOUGAME RANKED", "YOUGAME UNRANKED", "YOUGAME DOUBLES", "YOUGAME FRIENDS", "SQUAD STRIKE", "TOURNAMENT"},
     {
       "Competitive ranked sets with matchmaking rating.",
-      "Quick rollback matchmaking against live opponents.",
-      "Connect directly to a specific opponent by connect code.",
-      "2v2 doubles rollback netplay.",
+      "Quick rollback matchmaking (Left/Right switches service).",
+      "2v2 doubles rollback netplay with YouGame matchmaking.",
       "Join or host a lobby with friends.",
-      "Switch online page or view account status."
+      "4-fighter elimination sets against online opponents.",
+      "Enter scheduled bracket tournaments."
+    }
+  };
+  static const MenuDef kOnlineSlippi = {
+    "SLIPPI ONLINE", 4,
+    {"SLIPPI DIRECT", "SLIPPI UNRANKED", "SLIPPI TEAMS", "SLIPPI PARTY"},
+    {
+      "Connect directly to a specific opponent by connect code.",
+      "Play Slippi unranked rollback matches (Left/Right switches service).",
+      "2v2 doubles rollback netplay on Slippi.",
+      "Create or join a Slippi party lobby."
     }
   };
   static const MenuDef kStadium = {
@@ -427,11 +423,12 @@ inline const MenuDef* menu_def(int menu_kind, bool is_online_enabled) {
     }
   };
   static const MenuDef kToy = {
-    "TROPHIES", 3,
-    {"GALLERY", "LOTTERY", "COLLECTION"},
+    "TROPHIES", 4,
+    {"GALLERY", "LOTTERY", "", "COLLECTION"},
     {
       "Inspect unlocked trophies up close.",
       "Spend coins to unlock new trophies.",
+      "",
       "Browse trophies sorted by series and category."
     }
   };
@@ -448,25 +445,26 @@ inline const MenuDef* menu_def(int menu_kind, bool is_online_enabled) {
     }
   };
   static const MenuDef kData = {
-    "DATA", 4,
-    {"ARCHIVES", "VS. RECORDS", "SOUND TEST", "SPECIAL MOVIE"},
+    "DATA", 5,
+    {"SNAPSHOTS", "ARCHIVES", "SOUND TEST", "VS. RECORDS", "SPECIAL MOVIE"},
     {
+      "Browse saved camera mode photographs.",
       "View notices, milestones, and unlocked fighters.",
-      "Inspect match history, KO counts, and fighter stats.",
       "Listen to Melee music tracks and sound effects.",
+      "Inspect match history, KO counts, and fighter stats.",
       "Watch unlocked movies and credits."
     }
   };
 
   switch (menu_kind) {
-    case 0: return is_online_enabled ? &kMainOnline : &kMainVanilla;
+    case 0: return &kMain;
     case 1: return &k1P;
     case 2: return &kVs;
     case 3: return &kToy;
     case 4: return &kSettings;
     case 5: return &kData;
     case 6: return &kReg;
-    case 8: return &kOnline;
+    case 8: return (online_page == 1) ? &kOnlineSlippi : &kOnlineYouGame;
     case 9: return &kStadium;
     case 12: return &kSpecial;
     default: return nullptr;

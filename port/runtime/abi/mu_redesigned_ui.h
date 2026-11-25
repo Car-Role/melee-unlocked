@@ -100,15 +100,15 @@ static inline int mu_rui_css_icon_to_slot(int icon_idx)
  *   29: Random
  *   25: Final Destination (stkind 0x20)
  *   24: Battlefield (stkind 0x1F)
- *   8:  Yoshi's Story (stkind 0x02)
+ *   6:  Yoshi's Story (stkind 0x08)
  *   26: Dream Land 64 (stkind 0x1C)
- *   6:  Fountain of Dreams (stkind 0x08)
+ *   8:  Fountain of Dreams (stkind 0x02)
  *   18: Pokemon Stadium (stkind 0x03) — Counterpick
  */
 #define MU_RUI_SSS_PRIMARY_COUNT 7
 static inline uint8_t mu_rui_sss_primary_icon(int slot)
 {
-    static const uint8_t map[MU_RUI_SSS_PRIMARY_COUNT] = { 29, 25, 24, 8, 26, 6, 18 };
+    static const uint8_t map[MU_RUI_SSS_PRIMARY_COUNT] = { 29, 25, 24, 6, 26, 8, 18 };
     return (slot >= 0 && slot < MU_RUI_SSS_PRIMARY_COUNT) ? map[slot] : 29;
 }
 

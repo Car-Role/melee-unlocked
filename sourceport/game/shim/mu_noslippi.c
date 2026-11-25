@@ -215,6 +215,7 @@ int mu_slippi_menu_option(int row) { return row; }
 int mu_slippi_menu_label_kind(int row) { (void) row; return 0; }
 /* The two online pages are part of the online menus: off here. */
 int mu_slippi_online_pages(void) { return 0; }
+int mu_online_pages_page(void) { return 0; }
 int mu_online_pages_label(int row) { (void) row; return 0; }
 void mu_online_pages_describe(HSD_Text* text, int row) { (void) text; (void) row; }
 #if !MU_SQUAD

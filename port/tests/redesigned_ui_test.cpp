@@ -277,12 +277,13 @@ void run_abi_and_options_tests() {
          "HUD bit stays active when select toggle is off");
 }
 
-void run_headless_render_tests(const std::string& out_dir) {
+void run_headless_render_tests(const std::string& out_dir, const std::string& iso_path) {
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
   io.IniFilename = nullptr;
   io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+  if (!iso_path.empty()) gx::redesigned_ui::set_iso_path(iso_path);
 
   ImFont* f_disp = nullptr;
   ImFont* f_head = nullptr;
@@ -404,7 +405,7 @@ void run_headless_render_tests(const std::string& out_dir) {
     s.valid = 1; s.screen = MU_RUI_SCREEN_SSS; s.active_flags = MU_RUI_FLAG_ALL;
     s.sss_active = 1; s.sss_hovered_index = 25; s.sss_hovered_stkind = 0x20;
     s.sss_frozen_stadium = 1; s.sss_unlocked_mask = 0x3FFFFFFFu;
-    s.sss_struck_mask = (1u << 24) | (1u << 6); // Battlefield & FoD struck
+    s.sss_struck_mask = (1u << 24) | (1u << 8); // Battlefield & FoD struck
     s.sss_cursor_x = -7.2f; s.sss_cursor_y = 2.5f;
     render_scene("sss", "05_sss.png", 1280, 720, [&](ImDrawList* dl, float w, float h) {
       gx::redesigned_ui::draw_snapshot_for_test(s, dl, ImVec2(0, 0), ImVec2(w, h), 4.0f, 1.0f);
@@ -532,11 +533,13 @@ void run_headless_render_tests(const std::string& out_dir) {
 
 int main(int argc, char** argv) {
   std::string out_dir;
+  std::string iso_path;
   for (int i = 1; i + 1 < argc; ++i) {
     if (std::strcmp(argv[i], "--render-previews") == 0) out_dir = argv[i + 1];
+    else if (std::strcmp(argv[i], "--iso") == 0) iso_path = argv[i + 1];
   }
   run_abi_and_options_tests();
-  run_headless_render_tests(out_dir);
+  run_headless_render_tests(out_dir, iso_path);
   if (g_failures > 0) {
     std::fprintf(stderr, "redesigned_ui_test: %d failure(s)\n", g_failures);
     return 1;
